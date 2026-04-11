@@ -1,42 +1,99 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import { useCallback, useEffect, useRef, useState } from "react";
 import SceneCard from "@/components/SceneCard";
 import Timeline from "@/components/Timeline";
+import StylePanel from "@/components/StylePanel";
+import ProductImport from "@/components/ProductImport";
+import TemplateGallery from "@/components/TemplateGallery";
+import BatchPanel from "@/components/BatchPanel";
+import AudioPanel from "@/components/AudioPanel";
+import ScriptImport from "@/components/ScriptImport";
+import BrandKitPanel from "@/components/BrandKitPanel";
+import CompareModal from "@/components/CompareModal";
+import PreviewPlayer from "@/components/PreviewPlayer";
 import { configureFal, generateScene } from "@/lib/fal";
-import { extractLastFrame } from "@/lib/frame-extractor";
+import { TTS_MODELS, generateVoiceover } from "@/lib/audio";
 import { exportProject } from "@/lib/video-export";
-import { MODEL_CATALOG, type Scene } from "@/types";
+import { onSceneCompleted, planGenerationOrder } from "@/lib/style-engine";
+import { generateProductStoryboard, type ProductData } from "@/lib/storyboard-generator";
+import { scriptToScenes } from "@/lib/script-to-storyboard";
+import { applyTemplate, type Template } from "@/lib/templates";
+import { createDefaultBrandKit, brandKitToBrief, type BrandKit } from "@/lib/brand-kit";
+import { exportProjectFile, importProjectFile } from "@/lib/project-io";
+import { recordCost, getCostSummary } from "@/lib/cost-tracker";
+import { saveActiveJob, removeActiveJob } from "@/lib/job-recovery";
+import { type AudioTrack } from "@/lib/audio";
+import { MODEL_CATALOG, createDefaultStyleContext, type Scene, type StyleContext } from "@/types";
 
 // ── Helpers ──
 
 function makeScene(index: number): Scene {
+  const dur = MODEL_CATALOG[0].supportedDurations[0];
   return {
     id: crypto.randomUUID(),
     index,
+    role: "custom" as const,
     modelId: MODEL_CATALOG[0].id,
     prompt: "",
-    duration: MODEL_CATALOG[0].supportedDurations[0],
+    duration: dur,
     aspectRatio: "16:9",
+    trimStart: 0,
+    trimEnd: dur,
+    voiceoverText: "",
     status: "idle",
     progress: 0,
   };
 }
 
+function scenesFromPartials(partials: Omit<Scene, "id">[]): Scene[] {
+  return partials.map((p) => ({
+    ...p,
+    id: crypto.randomUUID(),
+    trimStart: p.trimStart ?? 0,
+    trimEnd: p.trimEnd ?? p.duration,
+    voiceoverText: (p as Scene).voiceoverText ?? "",
+  }));
+}
+
 const STORAGE_KEY = "cutagent-project";
 
-function saveToStorage(scenes: Scene[], apiKey: string) {
+function saveToStorage(scenes: Scene[], apiKey: string, styleContext: StyleContext) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ scenes, apiKey, savedAt: Date.now() }));
+    // Don't save base64 reference images to localStorage (5MB limit).
+    // Only save references that are hosted URLs.
+    const safeRefs = styleContext.references.filter((r) => !r.url.startsWith("data:"));
+    const safeCtx = { ...styleContext, references: safeRefs };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ scenes, apiKey, styleContext: safeCtx, savedAt: Date.now() }));
   } catch { /* quota exceeded, ignore */ }
 }
 
-function loadFromStorage(): { scenes: Scene[]; apiKey: string } | null {
+function loadFromStorage(): { scenes: Scene[]; apiKey: string; styleContext?: StyleContext } | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const data = JSON.parse(raw);
-    if (data.scenes?.length) return data;
+    if (data.scenes?.length) {
+      // Migrate old scenes that may lack new fields
+      data.scenes = data.scenes.map((s: Record<string, unknown>) => ({
+        ...s,
+        role: s.role ?? "custom",
+        trimStart: s.trimStart ?? 0,
+        trimEnd: s.trimEnd ?? s.duration,
+        voiceoverText: s.voiceoverText ?? "",
+      }));
+      // Deduplicate references in styleContext (from old extract-as-ref bug)
+      if (data.styleContext?.references) {
+        const seen = new Set<string>();
+        data.styleContext.references = data.styleContext.references.filter((r: { id: string }) => {
+          if (seen.has(r.id)) return false;
+          seen.add(r.id);
+          return true;
+        });
+      }
+      return data;
+    }
   } catch { /* corrupted, ignore */ }
   return null;
 }
@@ -48,36 +105,83 @@ export default function Home() {
   const [keySet, setKeySet] = useState(false);
   const [scenes, setScenes] = useState<Scene[]>([makeScene(0)]);
   const [selectedScene, setSelectedScene] = useState(0);
-  const [styleHarness, setStyleHarness] = useState(true);
+  const [styleContext, setStyleContext] = useState<StyleContext>(createDefaultStyleContext());
   const [isExporting, setIsExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState("");
+  const [audioTracks, setAudioTracks] = useState<AudioTrack[]>([]);
+  const [brandKit, setBrandKit] = useState<BrandKit>(createDefaultBrandKit());
+  const projectFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Cost tracking — hydration-safe (localStorage only available on client)
+  const [totalSpent, setTotalSpent] = useState(0);
+  useEffect(() => {
+    setTotalSpent(getCostSummary(scenes).totalSpent);
+  }, [scenes]);
+
+  // New feature modals
+  const [showScript, setShowScript] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
+  const [compareScene, setCompareScene] = useState<Scene | null>(null);
+
+  // Voice settings
+  const [voiceModelId, setVoiceModelId] = useState(TTS_MODELS[0].id);
+  const [voiceId, setVoiceId] = useState(TTS_MODELS[0].voices[0].id);
+
+  // Modal states
+  const [showImport, setShowImport] = useState(false);
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [showBatch, setShowBatch] = useState(false);
+
+  // Batch variations storage
+  const [variations, setVariations] = useState<Scene[][]>([]);
+  const [activeVariation, setActiveVariation] = useState(-1);
+  const [originalScenes, setOriginalScenes] = useState<Scene[] | null>(null);
+  const mountedRef = useRef(false);
 
   // ── Load from localStorage on mount ──
   useEffect(() => {
     const saved = loadFromStorage();
     if (saved) {
-      setScenes(saved.scenes);
+      // Migrate scenes: ensure trimStart/trimEnd/voiceoverText exist
+      const migratedScenes = saved.scenes.map((s: Scene) => ({
+        ...s,
+        trimStart: s.trimStart ?? 0,
+        trimEnd: s.trimEnd ?? s.duration,
+        voiceoverText: s.voiceoverText ?? "",
+      }));
+      setScenes(migratedScenes);
+      if (saved.styleContext) {
+        setStyleContext(saved.styleContext);
+      }
       if (saved.apiKey) {
         setApiKey(saved.apiKey);
         configureFal(saved.apiKey);
         setKeySet(true);
       }
     }
+    // Mark mounted after initial load to avoid save race
+    requestAnimationFrame(() => { mountedRef.current = true; });
   }, []);
 
-  // ── Auto-save to localStorage ──
+  // ── Auto-save to localStorage (skip initial mount to avoid overwriting key) ──
   useEffect(() => {
+    if (!mountedRef.current) return;
     if (scenes.length > 0) {
-      saveToStorage(scenes, keySet ? apiKey : "");
+      saveToStorage(scenes, keySet ? apiKey : "", styleContext);
     }
-  }, [scenes, apiKey, keySet]);
+  }, [scenes, apiKey, keySet, styleContext]);
 
   const updateScene = useCallback((updated: Scene) => {
     setScenes((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
   }, []);
 
   const addScene = () => {
-    setScenes((prev) => [...prev, makeScene(prev.length)]);
-    setSelectedScene(scenes.length);
+    setScenes((prev) => {
+      const next = [...prev, makeScene(prev.length)];
+      // Use functional update to avoid stale closure — prev.length is the new scene's index
+      setSelectedScene(prev.length);
+      return next;
+    });
   };
 
   const removeScene = (id: string) => {
@@ -88,7 +192,6 @@ export default function Home() {
     setSelectedScene((prev) => Math.max(0, prev - 1));
   };
 
-  // ── Drag-to-reorder ──
   const moveScene = useCallback((fromIndex: number, toIndex: number) => {
     setScenes((prev) => {
       const next = [...prev];
@@ -105,30 +208,7 @@ export default function Home() {
     setKeySet(true);
   };
 
-  // ── Style Harness: chain scenes via last-frame extraction ──
-  const applyStyleHarness = useCallback(async (completedScene: Scene) => {
-    if (!styleHarness || !completedScene.videoUrl) return;
-
-    // Find the next scene in order
-    setScenes((prev) => {
-      const idx = prev.findIndex((s) => s.id === completedScene.id);
-      const nextScene = prev[idx + 1];
-      if (!nextScene || nextScene.referenceImageUrl) return prev; // already has ref
-
-      // Extract last frame async and update
-      extractLastFrame(completedScene.videoUrl!).then((frameDataUrl) => {
-        setScenes((current) =>
-          current.map((s) =>
-            s.id === nextScene.id ? { ...s, referenceImageUrl: frameDataUrl } : s,
-          ),
-        );
-      }).catch(() => { /* frame extraction failed, continue without chaining */ });
-
-      return prev;
-    });
-  }, [styleHarness]);
-
-  // ── Generate a single scene ──
+  // ── Generate a single scene (using Style Engine) ──
   const handleGenerate = async (scene: Scene) => {
     if (!keySet) return;
     updateScene({ ...scene, status: "generating", progress: 0, error: undefined, videoUrl: undefined });
@@ -136,6 +216,7 @@ export default function Home() {
     try {
       const result = await generateScene({
         scene,
+        styleContext,
         onProgress: (status) => {
           const progress = status === "Queued" ? 10 : 50;
           updateScene({ ...scene, status: "generating", progress });
@@ -150,127 +231,379 @@ export default function Home() {
         requestId: result.requestId,
       };
       updateScene(completed);
+      recordCost(completed);
+      setTotalSpent(getCostSummary(scenes).totalSpent);
+      removeActiveJob(scene.id);
 
-      // Style Harness: chain to next scene
-      await applyStyleHarness(completed);
+      // Style Engine: extract frames and update reference bank
+      const updatedCtx = await onSceneCompleted(completed, styleContext);
+      setStyleContext(updatedCtx);
     } catch (err) {
+      // fal.ai SDK throws ValidationError with empty .message but real info in .body
+      let errorMsg = "Unknown error";
+      try {
+        const e = err as Record<string, unknown>;
+        if (typeof e?.body === "object" && e.body !== null) {
+          const body = e.body as Record<string, unknown>;
+          // Pydantic validation: { detail: [...] } or { detail: "string" }
+          if (typeof body.detail === "string") {
+            errorMsg = body.detail;
+          } else if (Array.isArray(body.detail)) {
+            errorMsg = body.detail.map((d: { msg?: string; loc?: unknown[] }) =>
+              `${d.msg ?? ""}${d.loc ? ` at ${JSON.stringify(d.loc)}` : ""}`
+            ).join("; ");
+          } else {
+            errorMsg = JSON.stringify(body);
+          }
+        } else if (typeof e?.body === "string") {
+          errorMsg = e.body;
+        } else if (typeof e?.message === "string" && e.message) {
+          errorMsg = e.message;
+        } else {
+          errorMsg = `${e?.name ?? "Error"} (status ${e?.status ?? "?"})`;
+        }
+      } catch {
+        errorMsg = String(err);
+      }
       updateScene({
         ...scene,
         status: "failed",
         progress: 0,
-        error: err instanceof Error ? err.message : String(err),
+        error: errorMsg,
       });
     }
   };
 
-  // ── Generate All (sequential for style harness chaining) ──
+  // ── Generate All (smart batching via Style Engine) ──
   const generateAll = async () => {
     const pending = scenes.filter((s) => s.prompt.trim() && s.status !== "generating" && s.status !== "completed");
-    if (styleHarness) {
-      // Sequential: chain each scene's last frame to the next
-      for (const scene of pending) {
-        await handleGenerate(scene);
-      }
-    } else {
-      // Parallel: fire all at once
-      for (const scene of pending) {
-        handleGenerate(scene);
-      }
+    const batches = planGenerationOrder(pending, styleContext);
+
+    for (const batch of batches) {
+      await Promise.all(batch.map((scene) => handleGenerate(scene)));
     }
   };
 
   // ── Export ──
   const handleExport = async () => {
     setIsExporting(true);
+    setExportProgress("");
     try {
-      await exportProject(scenes);
+      await exportProject(scenes, audioTracks, setExportProgress);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Export failed");
     } finally {
       setIsExporting(false);
+      setExportProgress("");
     }
+  };
+
+  // ── Project Save/Load ──
+  const handleSaveProject = () => {
+    const name = prompt("Project name:", "My CutAgent Project") ?? "project";
+    exportProjectFile(name, scenes, styleContext, audioTracks);
+  };
+
+  const handleLoadProject = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const project = await importProjectFile(file);
+      setScenes(scenesFromPartials(project.scenes));
+      if (project.styleContext) setStyleContext(project.styleContext);
+      if (project.audioTracks) setAudioTracks(project.audioTracks);
+      setSelectedScene(0);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to load project");
+    }
+    if (projectFileInputRef.current) projectFileInputRef.current.value = "";
+  };
+
+  // ── Audio tracks (project-level music) ──
+  const addAudioTrack = (track: AudioTrack) => setAudioTracks((prev) => [...prev, track]);
+  const removeAudioTrack = (id: string) => setAudioTracks((prev) => prev.filter((t) => t.id !== id));
+
+  const totalDuration = scenes.reduce((s, sc) => s + ((sc.trimEnd ?? sc.duration) - (sc.trimStart ?? 0)), 0);
+
+  // ── Per-scene voiceover generation ──
+  const handleGenerateSceneAudio = async (sceneId: string) => {
+    const scene = scenes.find((s) => s.id === sceneId);
+    if (!scene?.voiceoverText?.trim() || !keySet) return;
+
+    updateScene({ ...scene, audioStatus: "generating" });
+    try {
+      const result = await generateVoiceover({
+        text: scene.voiceoverText,
+        ttsModelId: voiceModelId,
+        voiceId,
+        sceneDuration: (scene.trimEnd ?? scene.duration) - (scene.trimStart ?? 0),
+      });
+      updateScene({ ...scene, audioUrl: result.url, audioStatus: "completed" });
+    } catch {
+      updateScene({ ...scene, audioStatus: "failed" });
+    }
+  };
+
+  const handleGenerateAllAudio = async () => {
+    const withVO = scenes.filter((s) => s.voiceoverText?.trim() && !s.audioUrl);
+    for (const scene of withVO) {
+      await handleGenerateSceneAudio(scene.id);
+    }
+  };
+
+  const handleUpdateSceneVO = (sceneId: string, text: string) => {
+    setScenes((prev) => prev.map((s) => s.id === sceneId ? { ...s, voiceoverText: text } : s));
+  };
+
+  // ── Product Import handler ──
+  const handleProductImport = (product: ProductData) => {
+    const storyboard = generateProductStoryboard(product);
+    const newScenes = scenesFromPartials(storyboard);
+    setScenes(newScenes);
+    setSelectedScene(0);
+    setShowImport(false);
+
+    // Inject product images into StyleContext as "product" references
+    // AND auto-fill the style brief with product info
+    if ((product.images?.length ?? 0) > 0 || product.title) {
+      setStyleContext((prev) => {
+        const productRefs = (product.images ?? []).slice(0, 3).map((url, i) => ({
+          id: `product-import-${i}`,
+          url,
+          type: "product" as const,
+          label: i === 0 ? `${product.title.slice(0, 30)} (main)` : `Product image ${i + 1}`,
+        }));
+
+        // Build a style brief from product data
+        const briefParts: string[] = [];
+        if (product.title) briefParts.push(`Product: ${product.title}.`);
+        briefParts.push("The actual product must be clearly visible and recognizable in every scene.");
+        briefParts.push("When showing a person, they must be holding or interacting with this specific product.");
+
+        return {
+          ...prev,
+          references: [
+            // Remove old product refs, keep others
+            ...prev.references.filter((r) => r.type !== "product"),
+            ...productRefs,
+          ],
+          brief: {
+            ...prev.brief,
+            description: prev.brief.description || briefParts.join(" "),
+          },
+        };
+      });
+    }
+  };
+
+  // ── Template handler ──
+  const handleTemplateSelect = (template: Template, productName: string) => {
+    const storyboard = applyTemplate(template, productName);
+    const newScenes = scenesFromPartials(storyboard);
+    setScenes(newScenes);
+    setSelectedScene(0);
+    setShowTemplates(false);
+  };
+
+  // ── Script-to-Storyboard handler ──
+  const handleScriptApply = (script: string, aspectRatio: string) => {
+    const storyboard = scriptToScenes(script, aspectRatio);
+    setScenes(scenesFromPartials(storyboard));
+    setSelectedScene(0);
+    setShowScript(false);
+  };
+
+  // ── Compare handler ──
+  const handleComparePickWinner = (modelId: string, videoUrl: string) => {
+    if (!compareScene) return;
+    updateScene({ ...compareScene, modelId, videoUrl, status: "completed", progress: 100 });
+    setCompareScene(null);
+  };
+
+  // ── Batch Variations handler ──
+  const handleBatchGenerate = (variationData: Omit<Scene, "id">[][]) => {
+    const newVariations = variationData.map((v) => scenesFromPartials(v));
+    setVariations(newVariations);
+    setActiveVariation(-1);
+    setShowBatch(false);
+  };
+
+  const switchVariation = (index: number) => {
+    if (index === activeVariation) return;
+    if (activeVariation === -1) {
+      setOriginalScenes([...scenes]);
+    }
+    if (index === -1) {
+      if (originalScenes) setScenes(originalScenes);
+    } else if (index >= 0 && index < variations.length) {
+      setScenes(variations[index]);
+    }
+    setActiveVariation(index);
+    setSelectedScene(0);
+  };
+
+  const removeVariation = (index: number) => {
+    setVariations((prev) => {
+      const next = prev.filter((_, i) => i !== index);
+      if (activeVariation === index) {
+        if (originalScenes) setScenes(originalScenes);
+        setActiveVariation(-1);
+      } else if (activeVariation > index) {
+        setActiveVariation((v) => v - 1);
+      }
+      return next;
+    });
   };
 
   const completedCount = scenes.filter((s) => s.status === "completed").length;
   const canExport = completedCount > 0;
 
   return (
-    <div className="flex flex-col h-screen bg-zinc-950 text-zinc-100">
-      {/* Header */}
-      <header className="flex items-center justify-between border-b border-zinc-800 px-6 py-3">
-        <div className="flex items-center gap-4">
-          <h1 className="text-base font-bold">CutAgent</h1>
-          <span className="text-[10px] text-zinc-600 bg-zinc-800 rounded px-2 py-0.5">open source</span>
-        </div>
+    <div className="relative flex min-h-screen flex-col overflow-hidden">
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute left-[-7rem] top-[-4rem] h-72 w-72 rounded-full bg-cyan-400/10 blur-3xl" />
+        <div className="absolute right-[-6rem] top-20 h-80 w-80 rounded-full bg-violet-400/10 blur-3xl" />
+        <div className="absolute bottom-[-10rem] left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-amber-300/8 blur-3xl" />
+      </div>
 
-        <div className="flex items-center gap-3">
-          {!keySet ? (
-            <div className="flex gap-2">
-              <input
-                type="password"
-                placeholder="fal.ai API key"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && connectKey()}
-                className="rounded-lg bg-zinc-800 border border-zinc-700 px-3 py-1.5 text-xs font-mono w-64 placeholder:text-zinc-600 focus:outline-none focus:border-blue-500"
-              />
-              <button
-                onClick={connectKey}
-                disabled={!apiKey.trim()}
-                className="rounded-lg bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-800 px-4 py-1.5 text-xs font-semibold transition"
-              >
-                Connect
-              </button>
+      {/* Header */}
+      <header className="relative z-20 border-b border-white/10 bg-slate-950/55 backdrop-blur-xl">
+        <div className="mx-auto flex w-full max-w-[1500px] flex-wrap items-center justify-between gap-4 px-4 py-4 sm:px-6">
+          <div className="flex items-center gap-4">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/6 text-sm font-semibold shadow-[0_16px_40px_rgba(0,0,0,0.28)]">
+              CA
             </div>
-          ) : (
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-1.5">
-                <span className="h-2 w-2 rounded-full bg-emerald-400" />
-                <span className="text-xs text-zinc-400">fal.ai connected</span>
+            <div>
+              <div className="flex items-center gap-3">
+                <h1 className="hero-title text-xl font-semibold text-white">CutAgent</h1>
+                <span className="rounded-full border border-cyan-400/18 bg-cyan-400/10 px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.18em] text-cyan-200">
+                  open source
+                </span>
               </div>
-              <button
-                onClick={() => { setKeySet(false); setApiKey(""); }}
-                className="text-[10px] text-zinc-600 hover:text-zinc-400"
-              >
-                Disconnect
-              </button>
+              <p className="text-xs text-zinc-500">
+                Storyboard-first AI video studio for product ads, UGC, and fast creative testing
+              </p>
             </div>
-          )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <Link
+              href="/waitlist"
+              className="rounded-full border border-white/10 bg-white/6 px-4 py-2 text-xs font-medium text-zinc-300 hover:border-white/20 hover:bg-white/10"
+            >
+              Hosted launch
+            </Link>
+            {!keySet ? (
+              <div className="glass-panel flex flex-wrap gap-2 rounded-2xl p-2">
+                <input
+                  type="password"
+                  placeholder="fal.ai API key"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && connectKey()}
+                  className="mono-ui h-10 w-64 rounded-xl border border-white/10 bg-black/20 px-3 text-xs text-white placeholder:text-zinc-600 focus:border-cyan-400/50 focus:outline-none focus:ring-2 focus:ring-cyan-400/15"
+                />
+                <button
+                  onClick={connectKey}
+                  disabled={!apiKey.trim()}
+                  className="h-10 rounded-xl bg-cyan-400 px-4 text-xs font-semibold text-slate-950 shadow-[0_14px_32px_rgba(83,212,255,0.24)] hover:bg-cyan-300 disabled:bg-zinc-800 disabled:text-zinc-500"
+                >
+                  Connect
+                </button>
+              </div>
+            ) : (
+              <div className="glass-panel flex items-center gap-3 rounded-2xl px-4 py-2.5">
+                <div className="flex items-center gap-2">
+                  <span className="h-2.5 w-2.5 rounded-full bg-emerald-400 shadow-[0_0_16px_rgba(74,222,128,0.75)]" />
+                  <span className="text-xs text-zinc-300">fal.ai connected</span>
+                </div>
+                <button
+                  onClick={() => { setKeySet(false); setApiKey(""); }}
+                  className="mono-ui text-[10px] uppercase tracking-[0.18em] text-zinc-500 hover:text-zinc-300"
+                >
+                  Disconnect
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
       {/* Main */}
-      <div className="flex-1 flex overflow-hidden">
-        <main className="flex-1 overflow-y-auto p-6">
-          <div className="max-w-4xl mx-auto">
-            {/* Toolbar */}
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h2 className="text-sm font-semibold text-zinc-300">Storyboard</h2>
-                <p className="text-[11px] text-zinc-600 mt-0.5">
-                  {scenes.length} scene{scenes.length !== 1 ? "s" : ""} · {completedCount} generated
-                </p>
-              </div>
-              <div className="flex gap-2 items-center">
-                {/* Style Harness toggle */}
-                <button
-                  onClick={() => setStyleHarness((v) => !v)}
-                  className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-[10px] font-medium transition ${
-                    styleHarness
-                      ? "border-violet-700 bg-violet-950/40 text-violet-300"
-                      : "border-zinc-700 bg-zinc-800 text-zinc-500"
-                  }`}
-                  title="When enabled, each scene's last frame is passed as a reference to the next scene for visual consistency"
-                >
-                  <span className={`h-1.5 w-1.5 rounded-full ${styleHarness ? "bg-violet-400" : "bg-zinc-600"}`} />
-                  Style Harness
-                </button>
+      <div className="relative z-10 flex flex-1 overflow-hidden">
+        <main className="flex-1 overflow-y-auto px-4 py-6 sm:px-6">
+          <div className="mx-auto max-w-6xl">
+            <section className="glass-panel-strong mb-6 overflow-hidden rounded-[2rem] p-6 sm:p-7">
+              <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr] lg:items-end">
+                <div className="space-y-5">
+                  <div className="section-badge">
+                    <span className="h-2 w-2 rounded-full bg-amber-300 shadow-[0_0_18px_rgba(245,185,79,0.7)]" />
+                    editor workspace
+                  </div>
+                  <div className="space-y-3">
+                    <h2 className="hero-title max-w-3xl text-4xl font-semibold leading-[0.95] text-white sm:text-5xl">
+                      Build ad storyboards that use the right model for each scene.
+                    </h2>
+                    <p className="max-w-2xl text-sm leading-7 text-zinc-300 sm:text-base">
+                      CutAgent helps you turn products, scripts, and ideas into scene-based AI
+                      videos with reusable templates, style continuity, and fast batch testing.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {["Product URL import", "Templates", "Style harness", "Batch variations"].map((item) => (
+                      <span
+                        key={item}
+                        className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-zinc-300"
+                      >
+                        {item}
+                      </span>
+                    ))}
+                  </div>
+                </div>
 
+                <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
+                  <div className="rounded-[1.4rem] border border-white/8 bg-white/[0.04] p-4">
+                    <p className="mono-ui text-[11px] uppercase tracking-[0.22em] text-zinc-500">
+                      Scenes
+                    </p>
+                    <p className="hero-title mt-2 text-3xl font-semibold text-cyan-300">{scenes.length}</p>
+                    <p className="mt-1 text-xs text-zinc-500">Hook, reveal, proof, CTA or custom flow</p>
+                  </div>
+                  <div className="rounded-[1.4rem] border border-white/8 bg-white/[0.04] p-4">
+                    <p className="mono-ui text-[11px] uppercase tracking-[0.22em] text-zinc-500">
+                      Generated
+                    </p>
+                    <p className="hero-title mt-2 text-3xl font-semibold text-emerald-300">{completedCount}</p>
+                    <p className="mt-1 text-xs text-zinc-500">Completed clips ready to review or export</p>
+                  </div>
+                  <div className="rounded-[1.4rem] border border-white/8 bg-white/[0.04] p-4">
+                    <p className="mono-ui text-[11px] uppercase tracking-[0.22em] text-zinc-500">
+                      Spend
+                    </p>
+                    <p className="hero-title mt-2 text-3xl font-semibold text-amber-300">
+                      ${totalSpent.toFixed(2)}
+                    </p>
+                    <p className="mt-1 text-xs text-zinc-500">Tracked output cost across completed scenes</p>
+                  </div>
+                </div>
+              </div>
+            </section>
+            {/* Toolbar */}
+            <div className="glass-panel mb-4 rounded-[1.6rem] p-4 sm:p-5">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-sm font-semibold text-zinc-200">Storyboard Workspace</h2>
+                  <p className="mt-1 text-[11px] leading-5 text-zinc-500">
+                    {scenes.length} scene{scenes.length !== 1 ? "s" : ""} · {completedCount} generated
+                    {totalSpent > 0 ? ` · $${totalSpent.toFixed(2)} spent` : ""}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
                 <button
                   onClick={addScene}
                   className="rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 px-4 py-2 text-xs font-medium transition"
                 >
-                  + Add Scene
+                  + Scene
                 </button>
                 <button
                   onClick={generateAll}
@@ -280,14 +613,169 @@ export default function Home() {
                   Generate All
                 </button>
                 <button
+                  onClick={() => setShowPreview(true)}
+                  disabled={completedCount === 0}
+                  className="rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 border border-zinc-700 px-3 py-2 text-xs font-medium transition"
+                  title="Preview full storyboard"
+                >
+                  Preview
+                </button>
+                <button
                   onClick={handleExport}
                   disabled={!canExport || isExporting}
                   className="rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-800 disabled:text-zinc-600 px-4 py-2 text-xs font-semibold transition"
+                  title={exportProgress || undefined}
                 >
-                  {isExporting ? "Exporting..." : "Export"}
+                  {isExporting ? (exportProgress || "Exporting...") : "Export"}
                 </button>
+                <button
+                  onClick={handleSaveProject}
+                  className="rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 px-3 py-2 text-xs font-medium transition"
+                  title="Save project as .json"
+                >
+                  Save
+                </button>
+                <button
+                  onClick={() => projectFileInputRef.current?.click()}
+                  className="rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 px-3 py-2 text-xs font-medium transition"
+                  title="Load project from .json"
+                >
+                  Load
+                </button>
+                <input
+                  ref={projectFileInputRef}
+                  type="file"
+                  accept=".json"
+                  onChange={handleLoadProject}
+                  className="hidden"
+                />
+                </div>
               </div>
             </div>
+
+            {/* Style Engine Panel */}
+            <div className="mb-3">
+              <StylePanel
+                styleContext={styleContext}
+                onChange={setStyleContext}
+              />
+            </div>
+
+            {/* Audio Panel */}
+            <div className="mb-4">
+              <AudioPanel
+                scenes={scenes}
+                audioTracks={audioTracks}
+                voiceModelId={voiceModelId}
+                voiceId={voiceId}
+                onVoiceModelChange={(m, v) => { setVoiceModelId(m); setVoiceId(v); }}
+                onGenerateSceneAudio={handleGenerateSceneAudio}
+                onGenerateAllAudio={handleGenerateAllAudio}
+                onAddTrack={addAudioTrack}
+                onRemoveTrack={removeAudioTrack}
+                onUpdateSceneVO={handleUpdateSceneVO}
+                totalDuration={totalDuration}
+              />
+            </div>
+
+            {/* Quick Actions */}
+            <div className="flex flex-wrap gap-2 mb-6">
+              <button
+                onClick={() => setShowImport(true)}
+                className="flex items-center gap-2 rounded-xl border border-dashed border-zinc-700 hover:border-blue-600 bg-zinc-900/50 hover:bg-blue-500/5 px-4 py-3 transition group"
+              >
+                <span className="text-lg group-hover:scale-110 transition-transform">🔗</span>
+                <div className="text-left">
+                  <span className="text-xs font-semibold text-zinc-300 block">Product URL</span>
+                  <span className="text-[10px] text-zinc-600">Paste link, get ad</span>
+                </div>
+              </button>
+
+              <button
+                onClick={() => setShowScript(true)}
+                className="flex items-center gap-2 rounded-xl border border-dashed border-zinc-700 hover:border-cyan-600 bg-zinc-900/50 hover:bg-cyan-500/5 px-4 py-3 transition group"
+              >
+                <span className="text-lg group-hover:scale-110 transition-transform">📝</span>
+                <div className="text-left">
+                  <span className="text-xs font-semibold text-zinc-300 block">Script</span>
+                  <span className="text-[10px] text-zinc-600">Paste script, get scenes</span>
+                </div>
+              </button>
+
+              <button
+                onClick={() => setShowTemplates(true)}
+                className="flex items-center gap-2 rounded-xl border border-dashed border-zinc-700 hover:border-violet-600 bg-zinc-900/50 hover:bg-violet-500/5 px-4 py-3 transition group"
+              >
+                <span className="text-lg group-hover:scale-110 transition-transform">📋</span>
+                <div className="text-left">
+                  <span className="text-xs font-semibold text-zinc-300 block">Templates</span>
+                  <span className="text-[10px] text-zinc-600">UGC, showcase, explainer</span>
+                </div>
+              </button>
+
+              <button
+                onClick={() => setShowBatch(true)}
+                disabled={!scenes.some((s) => s.prompt.trim())}
+                className="flex items-center gap-2 rounded-xl border border-dashed border-zinc-700 hover:border-orange-600 bg-zinc-900/50 hover:bg-orange-500/5 px-4 py-3 transition group disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <span className="text-lg group-hover:scale-110 transition-transform">🔀</span>
+                <div className="text-left">
+                  <span className="text-xs font-semibold text-zinc-300 block">Batch</span>
+                  <span className="text-[10px] text-zinc-600">Vary the hooks</span>
+                </div>
+              </button>
+            </div>
+
+            {/* Variation tabs */}
+            {variations.length > 0 && (
+              <div className="flex gap-1.5 mb-4 overflow-x-auto pb-1">
+                <button
+                  onClick={() => switchVariation(-1)}
+                  className={`flex-shrink-0 rounded-lg px-3 py-1.5 text-[11px] font-medium transition border ${
+                    activeVariation === -1
+                      ? "border-blue-500 bg-blue-500/10 text-blue-300"
+                      : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-zinc-600"
+                  }`}
+                >
+                  Original
+                </button>
+                {variations.map((_, i) => (
+                  <div key={`var-${i}`} className="flex-shrink-0 flex items-center">
+                    <button
+                      onClick={() => switchVariation(i)}
+                      className={`rounded-l-lg px-3 py-1.5 text-[11px] font-medium transition border border-r-0 ${
+                        activeVariation === i
+                          ? "border-orange-500 bg-orange-500/10 text-orange-300"
+                          : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-zinc-600"
+                      }`}
+                    >
+                      Variation {i + 1}
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); removeVariation(i); }}
+                      className={`rounded-r-lg px-1.5 py-1.5 text-[10px] transition border ${
+                        activeVariation === i
+                          ? "border-orange-500 bg-orange-500/10 text-orange-400 hover:text-red-400 hover:bg-red-500/10"
+                          : "border-zinc-700 bg-zinc-800 text-zinc-600 hover:text-red-400 hover:bg-red-500/10"
+                      }`}
+                      title={`Delete Variation ${i + 1}`}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+                <button
+                  onClick={() => {
+                    if (originalScenes) setScenes(originalScenes);
+                    setVariations([]);
+                    setActiveVariation(-1);
+                  }}
+                  className="flex-shrink-0 rounded-lg px-2 py-1.5 text-[11px] text-zinc-600 hover:text-red-400 transition"
+                >
+                  Clear All
+                </button>
+              </div>
+            )}
 
             {/* Scene cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -295,18 +783,32 @@ export default function Home() {
                 <SceneCard
                   key={scene.id}
                   scene={scene}
+                  isFirst={i === 0}
+                  isLast={i === scenes.length - 1}
+                  keyConnected={keySet}
+                  styleContext={styleContext}
                   onUpdate={updateScene}
                   onGenerate={() => handleGenerate(scene)}
                   onRemove={() => removeScene(scene.id)}
+                  onMoveUp={() => moveScene(i, i - 1)}
+                  onMoveDown={() => moveScene(i, i + 1)}
+                  onCompare={() => setCompareScene(scene)}
+                  onGenerateAll={async () => {
+                    await handleGenerate(scene);
+                    // After video completes, generate voiceover if text exists
+                    if (scene.voiceoverText?.trim()) {
+                      await handleGenerateSceneAudio(scene.id);
+                    }
+                  }}
                 />
               ))}
             </div>
 
             {/* Empty state */}
             {!keySet && (
-              <div className="mt-12 text-center text-zinc-600">
-                <p className="text-sm">Paste your fal.ai API key above to start generating</p>
-                <p className="text-xs mt-1">
+              <div className="glass-panel mt-12 rounded-[1.6rem] px-6 py-8 text-center text-zinc-600">
+                <p className="text-sm text-zinc-300">Paste your fal.ai API key above to start generating</p>
+                <p className="mt-1 text-xs">
                   Get one free at{" "}
                   <a href="https://fal.ai/dashboard/keys" target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">
                     fal.ai/dashboard/keys
@@ -323,6 +825,41 @@ export default function Home() {
         scenes={scenes}
         selectedIndex={selectedScene}
         onSelect={setSelectedScene}
+      />
+
+      {/* Modals */}
+      <ProductImport
+        open={showImport}
+        onClose={() => setShowImport(false)}
+        onImport={handleProductImport}
+      />
+      <TemplateGallery
+        open={showTemplates}
+        onClose={() => setShowTemplates(false)}
+        onSelect={handleTemplateSelect}
+      />
+      <BatchPanel
+        open={showBatch}
+        onClose={() => setShowBatch(false)}
+        scenes={scenes}
+        onGenerate={handleBatchGenerate}
+      />
+      <ScriptImport
+        open={showScript}
+        onClose={() => setShowScript(false)}
+        onApply={handleScriptApply}
+      />
+      <CompareModal
+        open={!!compareScene}
+        onClose={() => setCompareScene(null)}
+        scene={compareScene}
+        styleContext={styleContext}
+        onPickWinner={handleComparePickWinner}
+      />
+      <PreviewPlayer
+        open={showPreview}
+        onClose={() => setShowPreview(false)}
+        scenes={scenes}
       />
     </div>
   );

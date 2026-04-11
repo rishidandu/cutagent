@@ -9,7 +9,7 @@ interface Props {
 }
 
 export default function Timeline({ scenes, selectedIndex, onSelect }: Props) {
-  const totalDuration = scenes.reduce((s, sc) => s + sc.duration, 0);
+  const totalDuration = scenes.reduce((s, sc) => s + ((sc.trimEnd ?? sc.duration) - (sc.trimStart ?? 0)), 0);
   const totalCost = scenes.reduce((s, sc) => {
     const model = MODEL_CATALOG.find((m) => m.id === sc.modelId);
     return s + (model?.costPerSec ?? 0) * sc.duration;

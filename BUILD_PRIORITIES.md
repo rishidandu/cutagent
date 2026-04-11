@@ -1,23 +1,23 @@
 # CutAgent — Build Priorities
 
-## Tier 1 — Ship to GitHub (this week)
+## Tier 1 — Ship to GitHub (done)
 
-| # | Feature | Why | Effort |
+| # | Feature | Why | Status |
 |---|---|---|---|
-| 1 | **Style Harness v1** — when Scene 1 completes, extract last frame, auto-set as referenceImageUrl on Scene 2 | THE differentiator. No one else does this. | Medium |
-| 2 | **Video export** — stitch all completed scenes into one MP4 via FFmpeg.wasm | Can't ship without this. Users need a downloadable file. | Medium |
-| 3 | **Drag-to-reorder scenes** | Basic storyboard UX | Small |
-| 4 | **Persist state to localStorage** | Page refresh shouldn't kill your project | Small |
+| 1 | **Style Harness v1** — when Scene 1 completes, extract last frame, auto-set as referenceImageUrl on Scene 2 | THE differentiator. No one else does this. | Done |
+| 2 | **Video export** — download completed scenes as MP4 | Can't ship without this. Users need a downloadable file. | Done |
+| 3 | **Drag-to-reorder scenes** | Basic storyboard UX | Done |
+| 4 | **Persist state to localStorage** | Page refresh shouldn't kill your project | Done |
 
-## Tier 2 — E-commerce wedge (next 2 weeks)
+## Tier 2 — E-commerce wedge (done)
 
-| # | Feature | Why | Effort |
+| # | Feature | Why | Status |
 |---|---|---|---|
-| 5 | **Product URL import** — paste Shopify/Amazon URL, scrape title/images/price, auto-generate 4-scene storyboard | The killer workflow. "Paste URL, get ad." | Large |
-| 6 | **Template system** — pre-built storyboard templates ("UGC ad", "Product showcase", "Explainer") with pre-assigned models per scene | Reduces blank-canvas anxiety | Medium |
-| 7 | **Batch variations** — "Generate 5 versions of this storyboard with different hooks" | Volume is the value prop for e-commerce | Medium |
+| 5 | **Product URL import** — paste Shopify/Amazon URL, scrape title/images/price, auto-generate 4-scene storyboard | The killer workflow. "Paste URL, get ad." | Done |
+| 6 | **Template system** — 5 pre-built storyboard templates (UGC Ad, Product Showcase, Explainer, Before/After, Social Proof) with pre-assigned models per scene | Reduces blank-canvas anxiety | Done |
+| 7 | **Batch variations** — generate N versions of a storyboard with 8 different hook styles | Volume is the value prop for e-commerce | Done |
 
-## Tier 3 — Polish for launch (month 2)
+## Tier 3 — Polish for launch (next)
 
 | # | Feature | Why | Effort |
 |---|---|---|---|

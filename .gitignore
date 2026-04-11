@@ -35,3 +35,10 @@ Thumbs.db
 
 # claude
 .claude/
+
+# proprietary business docs (internal only)
+business/
+*.pptx
+
+# build artifacts
+tsconfig.tsbuildinfo

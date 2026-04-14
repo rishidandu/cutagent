@@ -328,6 +328,7 @@ export function buildScenePrompt(
 
 /**
  * Extract a ProductContext from scrape data for prompt building.
+ * Uses entity extraction (category, color, material) for richer prompts.
  */
 export function scrapeToProductContext(product: {
   title: string;
@@ -335,18 +336,25 @@ export function scrapeToProductContext(product: {
   price: string;
   brand: string;
   images: string[];
+  category?: string;
+  color?: string;
+  material?: string;
+  keywords?: string[];
 }): ProductContext {
-  const name = product.title || "the product";
-  const shortName = name.length > 35 ? name.slice(0, 35) : name;
+  const name = cleanForPrompt(product.title || "the product");
+  // Smart truncation: at word boundary, max ~40 chars
+  const shortName = name.length > 40
+    ? name.slice(0, name.lastIndexOf(" ", 40)).trim() || name.slice(0, 40)
+    : name;
   const desc = product.description || "";
 
-  // Extract a concise visual description from the product name/description
-  const visualCues = extractVisualCues(name, desc);
+  // Build visual description from ENTITIES (much richer than keyword search)
+  const visualCues = buildVisualDescription(name, desc, product.category, product.color, product.material);
 
-  // Find key benefit
-  const sentences = desc.split(/[.!]/).map((s) => s.trim()).filter((s) => s.length > 10 && s.length < 100);
+  // Find key benefit — expanded keyword list + first sentence fallback
+  const sentences = desc.split(/[.!]/).map((s) => s.trim()).filter((s) => s.length > 10 && s.length < 120);
   const benefitSentence = sentences.find((s) =>
-    /easy|fast|comfort|premium|professional|powerful|lightweight|durable|natural|organic|smooth|soft|perfect|convenient/i.test(s),
+    /easy|fast|comfort|premium|professional|powerful|lightweight|durable|natural|organic|smooth|soft|perfect|convenient|ergonomic|hypoallergenic|weatherproof|antimicrobial|breathable|waterproof|rechargeable|portable|compact|adjustable|versatile|sustainable/i.test(s),
   );
 
   return {
@@ -361,36 +369,62 @@ export function scrapeToProductContext(product: {
 }
 
 /**
- * Extract visual cues from product name and description for prompt grounding.
- * e.g. "matte black bottle with gold label" or "small rectangular box with colorful packaging"
+ * Clean a string for use in AI prompts — remove symbols that confuse models.
  */
-function extractVisualCues(name: string, description: string): string {
-  const combined = `${name} ${description}`.toLowerCase();
-
-  const colors: string[] = [];
-  const colorWords = ["black", "white", "red", "blue", "green", "gold", "silver", "pink", "brown", "matte", "glossy", "transparent", "clear"];
-  for (const c of colorWords) {
-    if (combined.includes(c)) colors.push(c);
-  }
-
-  const materials: string[] = [];
-  const materialWords = ["glass", "plastic", "metal", "wood", "ceramic", "leather", "fabric", "paper", "cardboard"];
-  for (const m of materialWords) {
-    if (combined.includes(m)) materials.push(m);
-  }
-
-  const shapes: string[] = [];
-  const shapeWords = ["bottle", "box", "tube", "jar", "can", "pouch", "bar", "stick", "pump", "spray", "dropper", "packet"];
-  for (const s of shapeWords) {
-    if (combined.includes(s)) shapes.push(s);
-  }
-
-  const parts: string[] = [];
-  if (colors.length > 0) parts.push(colors.slice(0, 2).join(" and "));
-  if (shapes.length > 0) parts.push(shapes[0]);
-  else parts.push("product");
-  if (materials.length > 0) parts.push(`(${materials[0]})`);
-
-  // Do NOT say "with visible branding" — that triggers models to hallucinate text
-  return parts.join(" ") + ", matching reference image exactly";
+function cleanForPrompt(s: string): string {
+  return s
+    .replace(/[®™©°]/g, "")
+    .replace(/&reg;/gi, "")
+    .replace(/&trade;/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
+
+/**
+ * Build a rich visual description from extracted entities.
+ * Uses category, color, material when available instead of keyword guessing.
+ */
+function buildVisualDescription(
+  name: string,
+  desc: string,
+  category?: string,
+  color?: string,
+  material?: string,
+): string {
+  const parts: string[] = [];
+
+  // Color from entity extraction (best) or keyword fallback
+  if (color) {
+    parts.push(color.toLowerCase());
+  } else {
+    const combined = `${name} ${desc}`.toLowerCase();
+    const colorWords = ["black", "white", "red", "blue", "green", "gold", "silver", "pink", "brown", "navy", "grey", "gray", "beige", "olive", "coral", "teal"];
+    const found = colorWords.filter((c) => combined.includes(c));
+    if (found.length > 0) parts.push(found.slice(0, 2).join(" and "));
+  }
+
+  // Material from entity extraction or keyword fallback
+  if (material) {
+    parts.push(material.toLowerCase());
+  } else {
+    const combined = `${name} ${desc}`.toLowerCase();
+    const materialWords = ["glass", "plastic", "metal", "wood", "ceramic", "leather", "fabric", "paper", "cardboard", "silicone", "rubber", "stainless steel", "aluminum", "cotton", "nylon", "canvas"];
+    const found = materialWords.find((m) => combined.includes(m));
+    if (found) parts.push(found);
+  }
+
+  // Category/shape from entity extraction or keyword fallback
+  if (category) {
+    parts.push(category.toLowerCase());
+  } else {
+    const combined = `${name} ${desc}`.toLowerCase();
+    const shapeWords = ["bottle", "box", "tube", "jar", "can", "pouch", "bar", "stick", "pump", "spray", "dropper", "packet", "bag", "backpack", "umbrella", "shoe", "watch", "phone", "tablet", "headphones", "earbuds", "camera"];
+    const found = shapeWords.find((s) => combined.includes(s));
+    if (found) parts.push(found);
+    else parts.push("product");
+  }
+
+  return parts.join(" ") + ", matching the reference image exactly";
+}
+
+// Old extractVisualCues removed — replaced by buildVisualDescription with entity support

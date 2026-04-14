@@ -11,6 +11,10 @@ export interface ProductData {
   images: string[];
   brand: string;
   source: string;
+  category?: string;
+  color?: string;
+  material?: string;
+  keywords?: string[];
 }
 
 /**
@@ -121,39 +125,45 @@ function buildVoiceovers(
   p: ProductContext,
   sceneDurations: Record<string, number>,
 ): Record<string, string> {
-  // Short product name — keep VO punchy, never more than 4 words for the name
-  const name = p.shortName.split(/\s+/).length > 4
-    ? p.shortName.split(/\s+/).slice(0, 4).join(" ")
-    : p.shortName;
+  // Clean product name for voiceover — strip symbols, keep punchy (max 4 words)
+  const cleanName = p.shortName.replace(/[®™©°|]/g, "").replace(/\s+/g, " ").trim();
+  const name = cleanName.split(/\s+/).length > 4
+    ? cleanName.split(/\s+/).slice(0, 4).join(" ")
+    : cleanName;
+
+  // Extract a short benefit phrase from the description for use in VO
+  const benefit = p.keyBenefit
+    ? p.keyBenefit.split(/[.!]/)[0].trim().slice(0, 60)
+    : "";
 
   type AdAngle = { hook: string; solution: string; proof: string; cta: string };
 
   const angles: AdAngle[] = [
-    // Convenience — short, punchy
+    // Convenience — uses benefit
     {
       hook: "Okay I have to show you this.",
-      solution: `This is ${name}. And it just works.`,
+      solution: benefit ? `This is ${name}. ${benefit}.` : `This is ${name}. And it just works.`,
       proof: "Been using it a week. Not going back.",
       cta: `${name}. Link in bio.`,
     },
-    // Quality
+    // Quality — uses benefit
     {
       hook: "You can tell the second you hold it.",
-      solution: `${name}. Built different.`,
+      solution: benefit ? `${name}. ${benefit}.` : `${name}. Built different.`,
       proof: "The quality is insane. Look at that.",
       cta: `Get yours${p.price ? ` for ${p.price}` : ""}. Trust me.`,
     },
     // Social proof
     {
       hook: "There's a reason this keeps selling out.",
-      solution: `Meet ${name}. Now you see why.`,
+      solution: benefit ? `Meet ${name}. ${benefit}.` : `Meet ${name}. Now you see why.`,
       proof: "Everyone I show this to wants one.",
       cta: `Don't sleep on ${name}. Link below.`,
     },
     // Value
     {
       hook: `${p.price ? `Only ${p.price}.` : "This price?"} I had to try it.`,
-      solution: `${name}. All of this at this price.`,
+      solution: benefit ? `${name}. ${benefit}.` : `${name}. All of this at this price.`,
       proof: "Outperforms stuff twice the cost.",
       cta: `Grab ${name} while you can. Link in bio.`,
     },

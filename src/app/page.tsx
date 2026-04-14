@@ -379,9 +379,17 @@ export default function Home() {
           label: i === 0 ? `${product.title.slice(0, 30)} (main)` : `Product image ${i + 1}`,
         }));
 
-        // Build a style brief from product data
+        // Build a rich style brief from product data + entities
         const briefParts: string[] = [];
-        if (product.title) briefParts.push(`Product: ${product.title}.`);
+        if (product.title) briefParts.push(`Product: ${product.title.replace(/[®™©]/g, "")}.`);
+        if (product.description) {
+          // Use first 2 sentences of description for context
+          const descSentences = product.description.split(/[.!]/).filter((s: string) => s.trim().length > 10).slice(0, 2);
+          if (descSentences.length) briefParts.push(`What it is: ${descSentences.join(". ")}.`);
+        }
+        if (product.category) briefParts.push(`Category: ${product.category}.`);
+        if (product.color) briefParts.push(`Color: ${product.color}.`);
+        if (product.material) briefParts.push(`Material: ${product.material}.`);
         briefParts.push("The actual product must be clearly visible and recognizable in every scene.");
         briefParts.push("When showing a person, they must be holding or interacting with this specific product.");
 

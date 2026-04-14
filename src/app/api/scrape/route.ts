@@ -117,13 +117,25 @@ async function tryShopifyJson(parsed: URL): Promise<ProductData | null> {
       .trim()
       .slice(0, 500);
 
+    // Extract entities from Shopify product data
+    const category = p.product_type || "";
+    const tags: string[] = Array.isArray(p.tags) ? p.tags : typeof p.tags === "string" ? p.tags.split(",").map((t: string) => t.trim()) : [];
+    // Try to extract color from first variant option
+    const color = p.variants?.[0]?.option1 && /color|colour/i.test(p.options?.[0]?.name || "")
+      ? p.variants[0].option1 : "";
+    const material = tags.find((t: string) => /leather|cotton|nylon|polyester|wool|silk|metal|wood|glass|ceramic/i.test(t)) || "";
+
     return {
-      title: p.title || "",
+      title: cleanProductTitle(p.title || ""),
       description,
       price,
-      images: images.slice(0, 8), // Up to 8 product images
+      images: images.slice(0, 8),
       brand: p.vendor || parsed.hostname.replace("www.", ""),
       source: "shopify",
+      category,
+      color,
+      material,
+      keywords: tags.slice(0, 10),
     };
   } catch {
     return null; // Not a Shopify store or API not available
@@ -139,6 +151,11 @@ interface ProductData {
   images: string[];
   brand: string;
   source: string;
+  /** Extracted product entities for better prompting */
+  category?: string;
+  color?: string;
+  material?: string;
+  keywords?: string[];
 }
 
 function extractProductData(html: string, hostname: string): ProductData {
@@ -172,26 +189,32 @@ function extractProductData(html: string, hostname: string): ProductData {
     return "";
   };
 
-  // Title: og:title > twitter:title > <title>
-  const title =
+  // Title: og:title > twitter:title > <title> — then clean up
+  const rawTitle =
     meta("og:title") ||
     meta("twitter:title") ||
     (html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1]?.trim() ?? "");
+  const title = cleanProductTitle(rawTitle);
 
-  // Description: og:description > description
+  // ── Extract structured data from JSON-LD (richest source) ──
+  const jsonLd = extractJsonLd(html);
+
+  // Description: JSON-LD > og:description > meta description
   const description =
-    meta("og:description") || meta("description") || "";
+    jsonLd.description ||
+    meta("og:description") ||
+    meta("description") || "";
 
-  // Price: product:price:amount > various structured data patterns
-  let price =
-    meta("product:price:amount") ||
-    meta("og:price:amount") ||
-    "";
+  // Entity extraction from JSON-LD
+  const category = jsonLd.category || "";
+  const color = jsonLd.color || "";
+  const material = jsonLd.material || "";
+  const keywords = jsonLd.keywords || [];
+
+  // Price: JSON-LD > meta tags > regex fallback
+  let price = jsonLd.price || meta("product:price:amount") || meta("og:price:amount") || "";
   if (!price) {
-    // Try JSON-LD
-    const jsonLdMatch = html.match(
-      /"price"\s*:\s*"?(\d+\.?\d*)"?/i,
-    );
+    const jsonLdMatch = html.match(/"price"\s*:\s*"?(\d+\.?\d*)"?/i);
     if (jsonLdMatch?.[1]) price = jsonLdMatch[1];
   }
   const currency = meta("product:price:currency") || meta("og:price:currency") || "USD";
@@ -288,13 +311,123 @@ function extractProductData(html: string, hostname: string): ProductData {
     .slice(0, 6);
 
   return {
-    title: decodeHtmlEntities(title),
+    title,
     description: decodeHtmlEntities(description).slice(0, 500),
     price,
     images: cleanImages,
     brand,
     source,
+    category,
+    color,
+    material,
+    keywords,
   };
+}
+
+/**
+ * Extract rich product data from JSON-LD structured data blocks.
+ * This is the BEST source for product info — contains description, category,
+ * color, material, price, and more that meta tags often miss.
+ */
+function extractJsonLd(html: string): {
+  description: string;
+  category: string;
+  color: string;
+  material: string;
+  price: string;
+  keywords: string[];
+} {
+  const result = { description: "", category: "", color: "", material: "", price: "", keywords: [] as string[] };
+
+  const blocks = html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi);
+  for (const block of blocks) {
+    try {
+      const raw = JSON.parse(block[1]);
+      const items = Array.isArray(raw) ? raw : [raw];
+
+      for (const item of items) {
+        // Only process Product schema
+        const type = item["@type"];
+        if (type !== "Product" && type !== "IndividualProduct") continue;
+
+        // Description — prefer JSON-LD over meta tags (richer, more complete)
+        if (item.description && !result.description) {
+          result.description = String(item.description)
+            .replace(/<[^>]*>/g, " ")   // strip HTML
+            .replace(/\s+/g, " ")
+            .trim()
+            .slice(0, 600);
+        }
+
+        // Category / product type
+        if (item.category && !result.category) {
+          result.category = String(item.category);
+        }
+        if (item.productGroupID && !result.category) {
+          result.category = String(item.productGroupID);
+        }
+
+        // Color
+        if (item.color && !result.color) {
+          result.color = String(typeof item.color === "string" ? item.color : item.color.name || "");
+        }
+        // Also check additionalProperty for color
+        if (item.additionalProperty && Array.isArray(item.additionalProperty)) {
+          for (const prop of item.additionalProperty) {
+            if (/color/i.test(prop.name) && prop.value && !result.color) {
+              result.color = String(prop.value);
+            }
+            if (/material/i.test(prop.name) && prop.value && !result.material) {
+              result.material = String(prop.value);
+            }
+          }
+        }
+
+        // Material
+        if (item.material && !result.material) {
+          result.material = String(typeof item.material === "string" ? item.material : item.material.name || "");
+        }
+
+        // Price from offers
+        if (item.offers && !result.price) {
+          const offers = Array.isArray(item.offers) ? item.offers : [item.offers];
+          for (const offer of offers) {
+            if (offer.price) {
+              const currency = offer.priceCurrency || "USD";
+              const symbol = currency === "USD" ? "$" : currency === "GBP" ? "\u00A3" : currency === "EUR" ? "\u20AC" : `${currency} `;
+              result.price = `${symbol}${offer.price}`;
+              break;
+            }
+          }
+        }
+
+        // Keywords from breadcrumb or tags
+        if (item.keywords) {
+          const kw = typeof item.keywords === "string"
+            ? item.keywords.split(",").map((k: string) => k.trim())
+            : Array.isArray(item.keywords) ? item.keywords : [];
+          result.keywords = kw.filter((k: string) => k.length > 0).slice(0, 10);
+        }
+      }
+
+      // Also check BreadcrumbList for category inference
+      for (const item of items) {
+        if (item["@type"] === "BreadcrumbList" && item.itemListElement && !result.category) {
+          const crumbs = item.itemListElement
+            .filter((c: { name?: string }) => c.name)
+            .map((c: { name: string }) => c.name);
+          // Last breadcrumb before the product name is usually the category
+          if (crumbs.length >= 2) {
+            result.category = crumbs[crumbs.length - 2];
+          }
+        }
+      }
+    } catch {
+      // Invalid JSON-LD block, skip
+    }
+  }
+
+  return result;
 }
 
 function escapeRegex(s: string): string {
@@ -309,7 +442,41 @@ function decodeHtmlEntities(s: string): string {
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&#x27;/g, "'")
-    .replace(/&#x2F;/g, "/");
+    .replace(/&#x2F;/g, "/")
+    .replace(/&reg;/gi, "")
+    .replace(/&trade;/gi, "")
+    .replace(/&copy;/gi, "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&deg;/gi, "")
+    .replace(/&mdash;/gi, " - ")
+    .replace(/&ndash;/gi, " - ")
+    .replace(/&#\d+;/g, "")      // numeric entities
+    .replace(/&#x[\da-f]+;/gi, "") // hex entities
+    .replace(/[®™©°]/g, "")       // literal unicode symbols
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Clean a product title: strip pipe separators, trim brand suffixes, normalize.
+ * "Product Name | Brand | Extra" → "Product Name"
+ * "Blue Tent - Camping Gear - OutdoorCo" → "Blue Tent"
+ */
+function cleanProductTitle(raw: string): string {
+  let title = decodeHtmlEntities(raw);
+
+  // Strip pipe-separated suffixes (keep the first segment which is usually the product name)
+  if (title.includes("|")) {
+    title = title.split("|")[0].trim();
+  }
+  // Also strip " - Brand Name" suffixes (common on Amazon, DTC sites)
+  if (title.includes(" - ") && title.split(" - ").length > 2) {
+    title = title.split(" - ").slice(0, -1).join(" - ").trim();
+  }
+  // Strip leading "Buy " or "Shop "
+  title = title.replace(/^(buy|shop|new|sale)\s+/i, "");
+
+  return title.trim();
 }
 
 /**

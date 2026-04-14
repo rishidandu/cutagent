@@ -103,9 +103,17 @@ export default function HookLab({ open, onClose, product, styleContext, onExpand
             progress: 0,
           };
           try {
+            // Use text-to-video (no image refs) for cheap hook testing
+            // Keep the brief for prompt context, but strip references
+            // so the adapter doesn't route to img2vid endpoints
+            const hookStyleContext = {
+              ...styleContext,
+              references: [],
+              autoChainLastFrame: false,
+            };
             const result = await generateScene({
               scene: hookScene as Scene,
-              styleContext,
+              styleContext: hookStyleContext,
             });
             setVariations((prev) =>
               prev.map((item, j) =>

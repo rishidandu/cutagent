@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { Scene } from "@/types";
+import { HOOK_STYLES } from "@/lib/hook-lab";
 
 interface Props {
   open: boolean;
@@ -9,17 +10,6 @@ interface Props {
   scenes: Scene[];
   onGenerate: (variations: Omit<Scene, "id">[][]) => void;
 }
-
-const HOOK_STYLES = [
-  { id: "surprise", label: "Surprise / Unboxing", template: "A person excitedly unboxing {product}, eyes wide with delight. Quick zoom into the product. Bright, energetic lighting. Authentic UGC phone-filmed style." },
-  { id: "problem", label: "Problem / Pain Point", template: "Someone visibly frustrated with the old way of doing things — then they discover {product}. Expression shifts from annoyed to amazed. Dramatic lighting change from dull to bright." },
-  { id: "pov", label: "POV / First Person", template: "POV shot: your hands open a sleek package to reveal {product} inside. Slow, satisfying reveal. Sunlight catches the product. ASMR-style first-person unboxing." },
-  { id: "asmr", label: "ASMR / Satisfying", template: "Extreme macro close-up of {product} details and textures. Slow, satisfying camera movement across the surface. Soft studio lighting. Tactile, premium feel." },
-  { id: "testimonial", label: "Testimonial / Review", template: "A genuine customer holding {product}, talking directly to camera with enthusiasm. Natural home setting, ring light. Authentic review style, casual and trustworthy." },
-  { id: "trend", label: "Trending / Viral", template: "Fast-paced trending social media edit — quick cuts of {product} from multiple angles. Text overlays flash by. Energetic, scroll-stopping. Viral TikTok style." },
-  { id: "luxury", label: "Luxury / Premium", template: "Cinematic slow-motion reveal of {product} emerging from premium packaging. Golden hour lighting, lens flare. Ultra-premium commercial feel." },
-  { id: "comedy", label: "Comedy / Relatable", template: "Funny relatable moment: someone struggling with an everyday problem, then {product} slides into frame. Record scratch moment. Comedic timing, exaggerated reactions." },
-] as const;
 
 export default function BatchPanel({ open, onClose, scenes, onGenerate }: Props) {
   const [count, setCount] = useState(3);

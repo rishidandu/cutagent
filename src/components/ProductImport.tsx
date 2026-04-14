@@ -19,9 +19,10 @@ interface Props {
   open: boolean;
   onClose: () => void;
   onImport: (product: ProductData) => void;
+  onHookLab?: (product: ProductData) => void;
 }
 
-export default function ProductImport({ open, onClose, onImport }: Props) {
+export default function ProductImport({ open, onClose, onImport, onHookLab }: Props) {
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
   const [normalizing, setNormalizing] = useState(false);
@@ -279,6 +280,15 @@ export default function ProductImport({ open, onClose, onImport }: Props) {
           >
             Cancel
           </button>
+          {onHookLab && (
+            <button
+              onClick={() => product && onHookLab(product)}
+              disabled={!product}
+              className="rounded-lg bg-orange-500 hover:bg-orange-400 disabled:bg-zinc-800 disabled:text-zinc-600 px-5 py-2 text-xs font-semibold text-white transition shadow-[0_6px_16px_rgba(249,115,22,0.2)]"
+            >
+              Hook Lab — Test 20 Hooks
+            </button>
+          )}
           <button
             onClick={handleConfirm}
             disabled={!product}

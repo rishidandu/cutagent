@@ -15,6 +15,7 @@ import BrandKitPanel from "@/components/BrandKitPanel";
 import CompareModal from "@/components/CompareModal";
 import PreviewPlayer from "@/components/PreviewPlayer";
 import UserMenu from "@/components/UserMenu";
+import HookLab from "@/components/HookLab";
 import { configureFal, generateScene } from "@/lib/fal";
 import { TTS_MODELS, generateVoiceover } from "@/lib/audio";
 import { exportProject } from "@/lib/video-export";
@@ -123,6 +124,8 @@ export default function Home() {
 
   // New feature modals
   const [showScript, setShowScript] = useState(false);
+  const [showHookLab, setShowHookLab] = useState(false);
+  const [hookLabProduct, setHookLabProduct] = useState<ProductData | null>(null);
   const [showPreview, setShowPreview] = useState(false);
   const [compareScene, setCompareScene] = useState<Scene | null>(null);
 
@@ -409,6 +412,49 @@ export default function Home() {
     }
   };
 
+  // ── Hook Lab handler ──
+  const handleHookLab = (product: ProductData) => {
+    setHookLabProduct(product);
+    setShowHookLab(true);
+    setShowImport(false);
+    // Set up StyleContext with product refs (same as handleProductImport)
+    if ((product.images?.length ?? 0) > 0 || product.title) {
+      setStyleContext((prev) => {
+        const productRefs = (product.images ?? []).slice(0, 3).map((url, i) => ({
+          id: `product-import-${i}`,
+          url,
+          type: "product" as const,
+          label: i === 0 ? `${product.title.slice(0, 30)} (main)` : `Product image ${i + 1}`,
+        }));
+        const briefParts: string[] = [];
+        if (product.title) briefParts.push(`Product: ${product.title.replace(/[®™©]/g, "")}.`);
+        if (product.description) {
+          const descSentences = product.description.split(/[.!]/).filter((s: string) => s.trim().length > 10).slice(0, 2);
+          if (descSentences.length) briefParts.push(`What it is: ${descSentences.join(". ")}.`);
+        }
+        if (product.category) briefParts.push(`Category: ${product.category}.`);
+        briefParts.push("The actual product must be clearly visible and recognizable in every scene.");
+        return {
+          ...prev,
+          references: [...prev.references.filter((r) => r.type !== "product"), ...productRefs],
+          brief: { ...prev.brief, description: prev.brief.description || briefParts.join(" ") },
+        };
+      });
+    }
+  };
+
+  const handleHookLabExpand = (storyboards: Omit<Scene, "id">[][]) => {
+    if (storyboards.length === 1) {
+      setScenes(scenesFromPartials(storyboards[0]));
+    } else {
+      setScenes(scenesFromPartials(storyboards[0]));
+      setVariations(storyboards.slice(1).map((sb) => scenesFromPartials(sb)));
+      setOriginalScenes(scenesFromPartials(storyboards[0]));
+    }
+    setSelectedScene(0);
+    setShowHookLab(false);
+  };
+
   // ── Template handler ──
   const handleTemplateSelect = (template: Template, productName: string) => {
     const storyboard = applyTemplate(template, productName);
@@ -585,6 +631,13 @@ export default function Home() {
                     title="Generate hook variations"
                   >
                     Batch
+                  </button>
+                  <button
+                    onClick={() => hookLabProduct ? setShowHookLab(true) : setShowImport(true)}
+                    className="rounded-xl border border-orange-500/20 bg-orange-400/[0.06] hover:bg-orange-400/[0.12] px-3.5 py-2.5 text-xs text-orange-300 font-semibold transition"
+                    title="Test 20+ hooks fast, then expand winners to full ads"
+                  >
+                    Hook Lab
                   </button>
                 </div>
               </div>
@@ -763,6 +816,7 @@ export default function Home() {
         open={showImport}
         onClose={() => setShowImport(false)}
         onImport={handleProductImport}
+        onHookLab={handleHookLab}
       />
       <TemplateGallery
         open={showTemplates}
@@ -792,6 +846,15 @@ export default function Home() {
         onClose={() => setShowPreview(false)}
         scenes={scenes}
       />
+      {hookLabProduct && (
+        <HookLab
+          open={showHookLab}
+          onClose={() => setShowHookLab(false)}
+          product={hookLabProduct}
+          styleContext={styleContext}
+          onExpandToStoryboard={handleHookLabExpand}
+        />
+      )}
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuth } from "@/lib/auth-guard";
 
 /**
  * Image Normalization Engine
@@ -37,6 +38,9 @@ interface NormalizeRequest {
 }
 
 export async function POST(req: NextRequest) {
+  const denied = await requireAuth();
+  if (denied) return denied;
+
   try {
     const body: NormalizeRequest = await req.json();
     const { urls, minWidth = 300, minHeight = 300 } = body;

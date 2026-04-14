@@ -9,11 +9,14 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@auth/supabase-adapter": "^1.11.1",
     "@fal-ai/client": "^1.9.5",
     "@ffmpeg/ffmpeg": "^0.12.15",
     "@ffmpeg/util": "^0.12.2",
+    "@supabase/supabase-js": "^2.103.0",
     "lucide-react": "^0.475.0",
     "next": "^15.3.0",
+    "next-auth": "^5.0.0-beta.30",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },

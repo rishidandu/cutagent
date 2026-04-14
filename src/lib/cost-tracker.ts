@@ -70,3 +70,33 @@ export function getCostSummary(scenes: Scene[]): CostSummary {
 export function clearCostHistory(): void {
   localStorage.removeItem(COST_KEY);
 }
+
+/**
+ * Record a generation cost to the cloud (Supabase) via API.
+ * Called alongside the localStorage `recordCost` when user is signed in.
+ */
+export async function recordCostToDb(
+  scene: Scene,
+  projectId: string | null,
+): Promise<void> {
+  const model = MODEL_CATALOG.find((m) => m.id === scene.modelId);
+  if (!model) return;
+
+  try {
+    await fetch("/api/generations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        scene_id: scene.id,
+        scene_index: scene.index,
+        model_name: model.name,
+        model_id: model.id,
+        duration: scene.duration,
+        cost: Math.round(model.costPerSec * scene.duration * 10000) / 10000,
+        project_id: projectId,
+      }),
+    });
+  } catch {
+    // Cloud recording failed — localStorage still has it
+  }
+}

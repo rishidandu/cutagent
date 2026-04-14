@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSession } from "next-auth/react";
 import SceneCard from "@/components/SceneCard";
 import Timeline from "@/components/Timeline";
 import StylePanel from "@/components/StylePanel";
@@ -13,6 +14,7 @@ import ScriptImport from "@/components/ScriptImport";
 import BrandKitPanel from "@/components/BrandKitPanel";
 import CompareModal from "@/components/CompareModal";
 import PreviewPlayer from "@/components/PreviewPlayer";
+import UserMenu from "@/components/UserMenu";
 import { configureFal, generateScene } from "@/lib/fal";
 import { TTS_MODELS, generateVoiceover } from "@/lib/audio";
 import { exportProject } from "@/lib/video-export";
@@ -22,7 +24,7 @@ import { scriptToScenes } from "@/lib/script-to-storyboard";
 import { applyTemplate, type Template } from "@/lib/templates";
 import { createDefaultBrandKit, brandKitToBrief, type BrandKit } from "@/lib/brand-kit";
 import { exportProjectFile, importProjectFile } from "@/lib/project-io";
-import { recordCost, getCostSummary } from "@/lib/cost-tracker";
+import { recordCost, getCostSummary, recordCostToDb } from "@/lib/cost-tracker";
 import { saveActiveJob, removeActiveJob } from "@/lib/job-recovery";
 import { type AudioTrack } from "@/lib/audio";
 import { MODEL_CATALOG, createDefaultStyleContext, type Scene, type StyleContext } from "@/types";
@@ -101,6 +103,7 @@ function loadFromStorage(): { scenes: Scene[]; apiKey: string; styleContext?: St
 // ── App ──
 
 export default function Home() {
+  const { data: session } = useSession();
   const [apiKey, setApiKey] = useState("");
   const [keySet, setKeySet] = useState(false);
   const [scenes, setScenes] = useState<Scene[]>([makeScene(0)]);
@@ -234,6 +237,8 @@ export default function Home() {
       recordCost(completed);
       setTotalSpent(getCostSummary(scenes).totalSpent);
       removeActiveJob(scene.id);
+      // Persist to cloud if signed in
+      if (session?.user) recordCostToDb(completed, null);
 
       // Style Engine: extract frames and update reference bank
       const updatedCtx = await onSceneCompleted(completed, styleContext);
@@ -487,6 +492,7 @@ export default function Home() {
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
+            <UserMenu />
             <Link
               href="/waitlist"
               className="rounded-full border border-white/10 bg-white/6 px-4 py-2 text-xs font-medium text-zinc-300 hover:border-white/20 hover:bg-white/10"

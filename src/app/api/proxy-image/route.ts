@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuth } from "@/lib/auth-guard";
 
 /**
  * Server-side image proxy.
@@ -8,6 +9,8 @@ import { NextRequest, NextResponse } from "next/server";
  * fal.ai storage, since many e-commerce CDNs block cross-origin requests.
  */
 export async function POST(req: NextRequest) {
+  const denied = await requireAuth();
+  if (denied) return denied;
   try {
     const { url } = await req.json();
     if (!url || typeof url !== "string") {

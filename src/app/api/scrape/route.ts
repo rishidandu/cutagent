@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuth } from "@/lib/auth-guard";
 
 /**
  * Server-side product URL scraper.
@@ -6,6 +7,9 @@ import { NextRequest, NextResponse } from "next/server";
  * for product title, description, images, and price.
  */
 export async function POST(req: NextRequest) {
+  const denied = await requireAuth();
+  if (denied) return denied;
+
   try {
     const { url } = await req.json();
     if (!url || typeof url !== "string") {

@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { fal } from "@fal-ai/client";
 import type { ProductData } from "@/lib/storyboard-generator";
 
 interface NormalizedImage {
@@ -67,27 +66,16 @@ export default function ProductImport({ open, onClose, onImport, onHookLab }: Pr
           });
           if (normResp.ok) {
             const normData = await normResp.json();
-            setNormalizedImages(normData.images || []);
+            const images = (normData.images || []) as NormalizedImage[];
+            setNormalizedImages(images);
 
-            // Step 3: Upload normalized images to fal.ai storage
-            const hosted: NormalizedImage[] = [];
-            for (const img of (normData.images || []) as NormalizedImage[]) {
-              try {
-                const blob = await fetch(img.dataUrl).then((r) => r.blob());
-                const hostedUrl = await fal.storage.upload(blob);
-                hosted.push({ ...img, hostedUrl });
-              } catch {
-                hosted.push(img); // Keep without hosted URL
-              }
-            }
-            setNormalizedImages(hosted);
-
-            // Update product.images with fal.ai-hosted URLs
-            const hostedUrls = hosted
-              .filter((h) => h.hostedUrl)
-              .map((h) => h.hostedUrl!);
-            if (hostedUrls.length > 0) {
-              setProduct((prev) => prev ? { ...prev, images: hostedUrls } : prev);
+            // Update product.images with the original (cleaned/upscaled) URLs
+            // fal.ai upload happens automatically at generation time via ensureHostedUrl()
+            if (images.length > 0) {
+              setProduct((prev) => prev ? {
+                ...prev,
+                images: images.map((img) => img.originalUrl),
+              } : prev);
             }
           }
         } catch {
@@ -204,7 +192,7 @@ export default function ProductImport({ open, onClose, onImport, onHookLab }: Pr
                   )}
                   {!normalizing && normalizedImages.length > 0 && (
                     <span className="text-[10px] text-emerald-400">
-                      {normalizedImages.filter((n) => n.hostedUrl).length} of {normalizedImages.length} uploaded to fal.ai
+                      {normalizedImages.length} image{normalizedImages.length !== 1 ? "s" : ""} validated
                     </span>
                   )}
                 </div>
@@ -215,9 +203,7 @@ export default function ProductImport({ open, onClose, onImport, onHookLab }: Pr
                           <img
                             src={img.dataUrl}
                             alt={`Product ${i + 1}`}
-                            className={`w-20 h-20 rounded-lg object-cover border ${
-                              img.hostedUrl ? "border-emerald-600" : "border-zinc-700"
-                            }`}
+                            className="w-20 h-20 rounded-lg object-cover border border-emerald-600"
                           />
                           <div className="absolute bottom-0.5 left-0.5 flex gap-0.5">
                             <span className={`text-[7px] rounded px-1 py-0.5 font-semibold ${
@@ -228,11 +214,9 @@ export default function ProductImport({ open, onClose, onImport, onHookLab }: Pr
                               {img.width}x{img.height}
                             </span>
                           </div>
-                          {img.hostedUrl && (
-                            <span className="absolute top-0.5 right-0.5 w-3 h-3 rounded-full bg-emerald-500 flex items-center justify-center text-[7px] text-white">
-                              ✓
-                            </span>
-                          )}
+                          <span className="absolute top-0.5 right-0.5 w-3 h-3 rounded-full bg-emerald-500 flex items-center justify-center text-[7px] text-white">
+                            ✓
+                          </span>
                         </div>
                       ))
                     : product.images?.slice(0, 6).map((img, i) => (

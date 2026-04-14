@@ -1,30 +1,20 @@
 import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
-import { SupabaseAdapter } from "@auth/supabase-adapter";
+import { isSupabaseConfigured, getServiceSupabase } from "@/lib/supabase";
 
 /**
- * NextAuth v5 config with Google SSO and Supabase adapter.
+ * NextAuth v5 config with Google SSO.
  *
- * When env vars are missing, auth is configured with no providers
- * and a dummy secret — the /api/auth/session endpoint returns {}
- * and useSession() returns null. Fully graceful.
+ * Uses JWT sessions (no database adapter) — user info stored in the cookie.
+ * On first sign-in, we upsert the user into Supabase ourselves via the
+ * signIn callback. This avoids the @auth/supabase-adapter which requires
+ * old-format JWT service_role keys.
  */
 
 const hasGoogle = !!(process.env.AUTH_GOOGLE_ID && process.env.AUTH_GOOGLE_SECRET);
-const hasSupabase = !!(
-  process.env.NEXT_PUBLIC_SUPABASE_URL?.startsWith("http") &&
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
-  // Use a dummy secret when not configured — session endpoint returns empty
   secret: process.env.AUTH_SECRET || "dev-secret-not-for-production",
-  adapter: hasSupabase
-    ? SupabaseAdapter({
-        url: process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        secret: process.env.SUPABASE_SERVICE_ROLE_KEY!,
-      })
-    : undefined,
   providers: hasGoogle
     ? [
         Google({
@@ -33,16 +23,54 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         }),
       ]
     : [],
-  session: {
-    strategy: hasSupabase ? "database" : "jwt",
-  },
+  session: { strategy: "jwt" },
   callbacks: {
-    session({ session, user, token }) {
-      if (user?.id) {
-        session.user.id = user.id;
-      } else if (token?.sub) {
-        session.user.id = token.sub;
+    async signIn({ user, profile }) {
+      // Upsert user into Supabase on every sign-in
+      if (isSupabaseConfigured() && user.email) {
+        try {
+          const supabase = getServiceSupabase();
+          await supabase.from("users").upsert(
+            {
+              email: user.email,
+              name: user.name ?? profile?.name ?? null,
+              image: user.image ?? (profile as Record<string, unknown>)?.picture ?? null,
+            },
+            { onConflict: "email" },
+          );
+        } catch {
+          // Don't block sign-in if DB write fails
+        }
       }
+      return true;
+    },
+    async jwt({ token, profile }) {
+      // On first sign-in, persist Google profile into JWT
+      if (profile) {
+        token.name = profile.name;
+        token.email = profile.email;
+        token.picture = profile.picture;
+
+        // Look up Supabase user ID for this email
+        if (isSupabaseConfigured() && profile.email) {
+          try {
+            const supabase = getServiceSupabase();
+            const { data } = await supabase
+              .from("users")
+              .select("id")
+              .eq("email", profile.email)
+              .single();
+            if (data?.id) token.sub = data.id;
+          } catch {
+            // Use Google sub as fallback ID
+          }
+        }
+      }
+      return token;
+    },
+    session({ session, token }) {
+      if (token.sub) session.user.id = token.sub;
+      if (token.picture) session.user.image = token.picture as string;
       return session;
     },
   },

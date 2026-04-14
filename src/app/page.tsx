@@ -632,6 +632,14 @@ export default function Home() {
               </div>
             </div>
 
+            {/* Style Engine */}
+            <div className="mb-3">
+              <StylePanel
+                styleContext={styleContext}
+                onChange={setStyleContext}
+              />
+            </div>
+
             {/* Variation tabs */}
             {variations.length > 0 && (
               <div className="flex gap-1.5 mb-4 overflow-x-auto pb-1">
@@ -710,12 +718,8 @@ export default function Home() {
               ))}
             </div>
 
-            {/* ── Settings panels (below scenes) ── */}
-            <div className="mt-6 grid gap-3 md:grid-cols-2">
-              <StylePanel
-                styleContext={styleContext}
-                onChange={setStyleContext}
-              />
+            {/* Audio panel (below scenes) */}
+            <div className="mt-6">
               <AudioPanel
                 scenes={scenes}
                 audioTracks={audioTracks}

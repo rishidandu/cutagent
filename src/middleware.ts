@@ -37,6 +37,11 @@ export async function middleware(req: NextRequest) {
     req.cookies.get("authjs.session-token")?.value;
 
   if (!sessionToken) {
+    // Homepage: show landing page instead of sign-in redirect
+    if (pathname === "/") {
+      return NextResponse.rewrite(new URL("/waitlist", req.url));
+    }
+    // All other protected routes: redirect to sign-in
     const signInUrl = new URL("/auth/signin", req.url);
     signInUrl.searchParams.set("callbackUrl", req.url);
     return NextResponse.redirect(signInUrl);

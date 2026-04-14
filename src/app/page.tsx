@@ -556,197 +556,80 @@ export default function Home() {
       <div className="relative z-10 flex flex-1 overflow-hidden">
         <main className="flex-1 overflow-y-auto px-4 py-6 sm:px-6">
           <div className="mx-auto max-w-6xl">
-            <section className="glass-panel-strong mb-6 overflow-hidden rounded-[2rem] p-6 sm:p-7">
-              <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr] lg:items-end">
-                <div className="space-y-5">
-                  <div className="section-badge">
-                    <span className="h-2 w-2 rounded-full bg-amber-300 shadow-[0_0_18px_rgba(245,185,79,0.7)]" />
-                    editor workspace
-                  </div>
-                  <div className="space-y-3">
-                    <h2 className="hero-title max-w-3xl text-4xl font-semibold leading-[0.95] text-white sm:text-5xl">
-                      Build ad storyboards that use the right model for each scene.
-                    </h2>
-                    <p className="max-w-2xl text-sm leading-7 text-zinc-300 sm:text-base">
-                      CutAgent helps you turn products, scripts, and ideas into scene-based AI
-                      videos with reusable templates, style continuity, and fast batch testing.
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {["Product URL import", "Templates", "Style harness", "Batch variations"].map((item) => (
-                      <span
-                        key={item}
-                        className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-zinc-300"
-                      >
-                        {item}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
-                  <div className="rounded-[1.4rem] border border-white/8 bg-white/[0.04] p-4">
-                    <p className="mono-ui text-[11px] uppercase tracking-[0.22em] text-zinc-500">
-                      Scenes
-                    </p>
-                    <p className="hero-title mt-2 text-3xl font-semibold text-cyan-300">{scenes.length}</p>
-                    <p className="mt-1 text-xs text-zinc-500">Hook, reveal, proof, CTA or custom flow</p>
-                  </div>
-                  <div className="rounded-[1.4rem] border border-white/8 bg-white/[0.04] p-4">
-                    <p className="mono-ui text-[11px] uppercase tracking-[0.22em] text-zinc-500">
-                      Generated
-                    </p>
-                    <p className="hero-title mt-2 text-3xl font-semibold text-emerald-300">{completedCount}</p>
-                    <p className="mt-1 text-xs text-zinc-500">Completed clips ready to review or export</p>
-                  </div>
-                  <div className="rounded-[1.4rem] border border-white/8 bg-white/[0.04] p-4">
-                    <p className="mono-ui text-[11px] uppercase tracking-[0.22em] text-zinc-500">
-                      Spend
-                    </p>
-                    <p className="hero-title mt-2 text-3xl font-semibold text-amber-300">
-                      ${totalSpent.toFixed(2)}
-                    </p>
-                    <p className="mt-1 text-xs text-zinc-500">Tracked output cost across completed scenes</p>
-                  </div>
-                </div>
-              </div>
-            </section>
-            {/* Toolbar */}
-            <div className="glass-panel mb-4 rounded-[1.6rem] p-4 sm:p-5">
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div>
-                  <h2 className="text-sm font-semibold text-zinc-200">Storyboard Workspace</h2>
-                  <p className="mt-1 text-[11px] leading-5 text-zinc-500">
-                    {scenes.length} scene{scenes.length !== 1 ? "s" : ""} · {completedCount} generated
-                    {totalSpent > 0 ? ` · $${totalSpent.toFixed(2)} spent` : ""}
-                  </p>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
+            {/* ── Product URL Import (primary CTA) ── */}
+            <div className="glass-panel-strong mb-4 rounded-[1.6rem] p-4 sm:p-5">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                 <button
-                  onClick={addScene}
-                  className="rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 px-4 py-2 text-xs font-medium transition"
+                  onClick={() => setShowImport(true)}
+                  className="flex-1 flex items-center gap-3 rounded-xl border border-dashed border-cyan-500/30 hover:border-cyan-400/50 bg-cyan-400/[0.04] hover:bg-cyan-400/[0.08] px-5 py-3.5 text-left transition group"
                 >
-                  + Scene
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-cyan-400/10 text-cyan-300 text-lg shrink-0">
+                    🔗
+                  </div>
+                  <div>
+                    <span className="text-sm font-semibold text-white block">Paste a product URL to get started</span>
+                    <span className="text-[11px] text-zinc-500">Shopify, Amazon, or any product page → 4-scene ad storyboard</span>
+                  </div>
                 </button>
-                <button
-                  onClick={generateAll}
-                  disabled={!keySet || scenes.every((s) => !s.prompt.trim() || s.status === "generating")}
-                  className="rounded-lg bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-800 disabled:text-zinc-600 px-5 py-2 text-xs font-semibold transition"
-                >
-                  Generate All
-                </button>
-                <button
-                  onClick={() => setShowPreview(true)}
-                  disabled={completedCount === 0}
-                  className="rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 border border-zinc-700 px-3 py-2 text-xs font-medium transition"
-                  title="Preview full storyboard"
-                >
-                  Preview
-                </button>
-                <button
-                  onClick={handleExport}
-                  disabled={!canExport || isExporting}
-                  className="rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-800 disabled:text-zinc-600 px-4 py-2 text-xs font-semibold transition"
-                  title={exportProgress || undefined}
-                >
-                  {isExporting ? (exportProgress || "Exporting...") : "Export"}
-                </button>
-                <button
-                  onClick={handleSaveProject}
-                  className="rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 px-3 py-2 text-xs font-medium transition"
-                  title="Save project as .json"
-                >
-                  Save
-                </button>
-                <button
-                  onClick={() => projectFileInputRef.current?.click()}
-                  className="rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 px-3 py-2 text-xs font-medium transition"
-                  title="Load project from .json"
-                >
-                  Load
-                </button>
-                <input
-                  ref={projectFileInputRef}
-                  type="file"
-                  accept=".json"
-                  onChange={handleLoadProject}
-                  className="hidden"
-                />
+                <div className="flex gap-2 shrink-0">
+                  <button onClick={() => setShowScript(true)} className="rounded-xl border border-white/8 bg-white/[0.04] hover:bg-white/[0.07] px-3.5 py-2.5 text-xs text-zinc-300 transition" title="Paste a script">
+                    Script
+                  </button>
+                  <button onClick={() => setShowTemplates(true)} className="rounded-xl border border-white/8 bg-white/[0.04] hover:bg-white/[0.07] px-3.5 py-2.5 text-xs text-zinc-300 transition" title="Use a template">
+                    Templates
+                  </button>
+                  <button
+                    onClick={() => setShowBatch(true)}
+                    disabled={!scenes.some((s) => s.prompt.trim())}
+                    className="rounded-xl border border-white/8 bg-white/[0.04] hover:bg-white/[0.07] px-3.5 py-2.5 text-xs text-zinc-300 transition disabled:opacity-30"
+                    title="Generate hook variations"
+                  >
+                    Batch
+                  </button>
                 </div>
               </div>
             </div>
 
-            {/* Style Engine Panel */}
-            <div className="mb-3">
-              <StylePanel
-                styleContext={styleContext}
-                onChange={setStyleContext}
-              />
-            </div>
-
-            {/* Audio Panel */}
-            <div className="mb-4">
-              <AudioPanel
-                scenes={scenes}
-                audioTracks={audioTracks}
-                voiceModelId={voiceModelId}
-                voiceId={voiceId}
-                onVoiceModelChange={(m, v) => { setVoiceModelId(m); setVoiceId(v); }}
-                onGenerateSceneAudio={handleGenerateSceneAudio}
-                onGenerateAllAudio={handleGenerateAllAudio}
-                onAddTrack={addAudioTrack}
-                onRemoveTrack={removeAudioTrack}
-                onUpdateSceneVO={handleUpdateSceneVO}
-                totalDuration={totalDuration}
-              />
-            </div>
-
-            {/* Quick Actions */}
-            <div className="flex flex-wrap gap-2 mb-6">
-              <button
-                onClick={() => setShowImport(true)}
-                className="flex items-center gap-2 rounded-xl border border-dashed border-zinc-700 hover:border-blue-600 bg-zinc-900/50 hover:bg-blue-500/5 px-4 py-3 transition group"
-              >
-                <span className="text-lg group-hover:scale-110 transition-transform">🔗</span>
-                <div className="text-left">
-                  <span className="text-xs font-semibold text-zinc-300 block">Product URL</span>
-                  <span className="text-[10px] text-zinc-600">Paste link, get ad</span>
+            {/* ── Action bar (Generate All + controls) ── */}
+            <div className="glass-panel mb-4 rounded-[1.4rem] px-4 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-zinc-400">
+                    {scenes.length} scene{scenes.length !== 1 ? "s" : ""}
+                    {completedCount > 0 && <span className="text-emerald-400"> · {completedCount} done</span>}
+                    {totalSpent > 0 && <span className="text-amber-300"> · ${totalSpent.toFixed(2)}</span>}
+                  </span>
                 </div>
-              </button>
-
-              <button
-                onClick={() => setShowScript(true)}
-                className="flex items-center gap-2 rounded-xl border border-dashed border-zinc-700 hover:border-cyan-600 bg-zinc-900/50 hover:bg-cyan-500/5 px-4 py-3 transition group"
-              >
-                <span className="text-lg group-hover:scale-110 transition-transform">📝</span>
-                <div className="text-left">
-                  <span className="text-xs font-semibold text-zinc-300 block">Script</span>
-                  <span className="text-[10px] text-zinc-600">Paste script, get scenes</span>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <button onClick={addScene} className="rounded-lg border border-white/8 bg-white/[0.04] hover:bg-white/[0.07] px-3 py-1.5 text-xs text-zinc-300 transition">
+                    + Scene
+                  </button>
+                  <button
+                    onClick={generateAll}
+                    disabled={!keySet || scenes.every((s) => !s.prompt.trim() || s.status === "generating")}
+                    className="rounded-lg bg-cyan-500 hover:bg-cyan-400 disabled:bg-zinc-800 disabled:text-zinc-600 px-5 py-1.5 text-xs font-semibold text-slate-950 transition shadow-[0_8px_20px_rgba(83,212,255,0.2)]"
+                  >
+                    Generate All
+                  </button>
+                  <button onClick={() => setShowPreview(true)} disabled={completedCount === 0} className="rounded-lg border border-white/8 bg-white/[0.04] hover:bg-white/[0.07] disabled:opacity-30 px-3 py-1.5 text-xs text-zinc-300 transition">
+                    Preview
+                  </button>
+                  <button
+                    onClick={handleExport}
+                    disabled={!canExport || isExporting}
+                    className="rounded-lg bg-emerald-500/90 hover:bg-emerald-400 disabled:bg-zinc-800 disabled:text-zinc-600 px-3 py-1.5 text-xs font-semibold text-white transition"
+                  >
+                    {isExporting ? (exportProgress || "Export...") : "Export"}
+                  </button>
+                  <button onClick={handleSaveProject} className="rounded-lg border border-white/8 bg-white/[0.04] hover:bg-white/[0.07] px-3 py-1.5 text-xs text-zinc-300 transition" title="Save">
+                    Save
+                  </button>
+                  <button onClick={() => projectFileInputRef.current?.click()} className="rounded-lg border border-white/8 bg-white/[0.04] hover:bg-white/[0.07] px-3 py-1.5 text-xs text-zinc-300 transition" title="Load">
+                    Load
+                  </button>
+                  <input ref={projectFileInputRef} type="file" accept=".json" onChange={handleLoadProject} className="hidden" />
                 </div>
-              </button>
-
-              <button
-                onClick={() => setShowTemplates(true)}
-                className="flex items-center gap-2 rounded-xl border border-dashed border-zinc-700 hover:border-violet-600 bg-zinc-900/50 hover:bg-violet-500/5 px-4 py-3 transition group"
-              >
-                <span className="text-lg group-hover:scale-110 transition-transform">📋</span>
-                <div className="text-left">
-                  <span className="text-xs font-semibold text-zinc-300 block">Templates</span>
-                  <span className="text-[10px] text-zinc-600">UGC, showcase, explainer</span>
-                </div>
-              </button>
-
-              <button
-                onClick={() => setShowBatch(true)}
-                disabled={!scenes.some((s) => s.prompt.trim())}
-                className="flex items-center gap-2 rounded-xl border border-dashed border-zinc-700 hover:border-orange-600 bg-zinc-900/50 hover:bg-orange-500/5 px-4 py-3 transition group disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                <span className="text-lg group-hover:scale-110 transition-transform">🔀</span>
-                <div className="text-left">
-                  <span className="text-xs font-semibold text-zinc-300 block">Batch</span>
-                  <span className="text-[10px] text-zinc-600">Vary the hooks</span>
-                </div>
-              </button>
+              </div>
             </div>
 
             {/* Variation tabs */}
@@ -825,6 +708,27 @@ export default function Home() {
                   }}
                 />
               ))}
+            </div>
+
+            {/* ── Settings panels (below scenes) ── */}
+            <div className="mt-6 grid gap-3 md:grid-cols-2">
+              <StylePanel
+                styleContext={styleContext}
+                onChange={setStyleContext}
+              />
+              <AudioPanel
+                scenes={scenes}
+                audioTracks={audioTracks}
+                voiceModelId={voiceModelId}
+                voiceId={voiceId}
+                onVoiceModelChange={(m, v) => { setVoiceModelId(m); setVoiceId(v); }}
+                onGenerateSceneAudio={handleGenerateSceneAudio}
+                onGenerateAllAudio={handleGenerateAllAudio}
+                onAddTrack={addAudioTrack}
+                onRemoveTrack={removeAudioTrack}
+                onUpdateSceneVO={handleUpdateSceneVO}
+                totalDuration={totalDuration}
+              />
             </div>
 
             {/* Empty state */}

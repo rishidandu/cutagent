@@ -81,12 +81,15 @@ export default function HookLab({ open, onClose, product, styleContext, onExpand
     setVariations(planned.map((v) => ({ ...v, status: "generating" as const })));
     setPhase("generating");
 
-    // Chunk into batches of 5 to avoid rate limits
-    const BATCH_SIZE = 5;
+    // Generate sequentially with stagger to avoid rate limits / account locks
+    // fal.ai locks accounts that burst too many concurrent requests to the same model
+    const BATCH_SIZE = 2;
     for (let i = 0; i < planned.length; i += BATCH_SIZE) {
       const batch = planned.slice(i, i + BATCH_SIZE);
       await Promise.all(
         batch.map(async (v, batchIdx) => {
+          // Stagger within batch to avoid hitting same model simultaneously
+          if (batchIdx > 0) await new Promise((r) => setTimeout(r, batchIdx * 1500));
           const globalIdx = i + batchIdx;
           const hookScene: Partial<Scene> & { id: string; modelId: string; prompt: string; duration: number; aspectRatio: string } = {
             id: v.id,

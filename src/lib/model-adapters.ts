@@ -5,6 +5,7 @@ import {
   type Scene,
   type StyleBrief,
 } from "@/types";
+import { NEGATIVE_PROMPT } from "@/lib/prompt-engine";
 
 // ── Adapter interfaces ──
 
@@ -63,6 +64,7 @@ function buildKlingRequest({ scene, model, brief, references, strength }: Adapte
   const prompt = augmentPrompt(scene.prompt, brief);
   const input: Record<string, unknown> = {
     prompt,
+    negative_prompt: NEGATIVE_PROMPT,
     aspect_ratio: scene.aspectRatio,
     duration: `${scene.duration}`,
   };
@@ -119,6 +121,7 @@ function buildWanRequest({ scene, model, brief, references }: AdapterInput): Ada
   const prompt = augmentPrompt(scene.prompt, brief);
   const input: Record<string, unknown> = {
     prompt,
+    negative_prompt: NEGATIVE_PROMPT,
     aspect_ratio: scene.aspectRatio,
     num_frames: Math.round(scene.duration * 16),
   };
@@ -140,6 +143,7 @@ function buildSeedanceRequest({ scene, model, brief, references }: AdapterInput)
   const dur = Math.max(4, Math.min(12, Math.round(scene.duration)));
   const input: Record<string, unknown> = {
     prompt,
+    negative_prompt: NEGATIVE_PROMPT,
     aspect_ratio: scene.aspectRatio,
     duration: `${dur}`,
     // Disable native audio if scene has voiceover text — the TTS voiceover

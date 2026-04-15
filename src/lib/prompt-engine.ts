@@ -43,13 +43,22 @@ export interface StylePrefix {
  * These are appended to EVERY prompt to prevent models from adding
  * fake text, logos, labels, or branding to products.
  */
-const PRODUCT_FIDELITY = [
-  "CRITICAL: Do NOT add, modify, or generate any text, labels, logos, or writing on the product",
-  "The product must appear EXACTLY as it looks in the reference image with no alterations",
-  "Do not invent brand names, slogans, or decorative text on any surface",
-  "Keep all product surfaces, packaging, and labels identical to the original",
-  "No floating text, watermarks, or overlaid graphics in the scene",
-].join(". ");
+/**
+ * POSITIVE prompt fidelity — focus on shape/appearance, NOT text.
+ * Avoid mentioning "text", "labels", "logos" etc. in the positive prompt
+ * because models interpret those words as generation targets.
+ */
+const PRODUCT_FIDELITY =
+  "Product must match the reference image exactly. Preserve product shape, color, proportions, and surface details. Keep the product unaltered throughout the scene.";
+
+/**
+ * NEGATIVE prompt — what to AVOID generating.
+ * This is passed as `negative_prompt` to models that support it (Kling, Wan, Seedance).
+ * Putting text-related words HERE instead of the positive prompt
+ * is far more effective at preventing text hallucination.
+ */
+export const NEGATIVE_PROMPT =
+  "text, words, letters, numbers, labels, logos, watermarks, subtitles, captions, writing, brand names, slogans, signs, stamps, badges, stickers, UI elements, blurry, distorted, low quality, deformed";
 
 export type AdStyle = "ugc" | "studio" | "custom";
 
@@ -167,17 +176,17 @@ const ROLE_TEMPLATES: Record<SceneRole, RoleTemplate[]> = {
     {
       subjectAction: (p) => `Extreme close-up of a person's hands lifting ${p.shortName} out of a delivery box, fingers gripping the product clearly`,
       environment: (p) => `clean desk or countertop surface, package tissue paper visible, ${p.visualDescription}`,
-      continuityCues: "preserve exact product shape, do NOT add or change any text or labels on the product, maintain consistent proportions",
+      continuityCues: "preserve exact product shape, maintain consistent proportions throughout",
     },
     {
       subjectAction: (p) => `POV shot: a hand reaches toward ${p.shortName} sitting on a table, quick grab motion, then holds it up to camera`,
       environment: (p) => `bright modern kitchen or bathroom counter, morning light, ${p.visualDescription}`,
-      continuityCues: "do NOT generate fake text or labels on product, preserve original product appearance exactly, no morphing",
+      continuityCues: "preserve original product appearance exactly, no morphing or warping",
     },
     {
       subjectAction: (p) => `Person scrolling phone stops abruptly, looks up with wide eyes, camera whip-pans to reveal ${p.shortName} on the surface next to them`,
       environment: (p) => `cozy home setting, couch or bed, casual outfit, ${p.visualDescription}`,
-      continuityCues: "product appears sharp and in-focus, do NOT alter product surface or add any text/logos not in original",
+      continuityCues: "product appears sharp and in-focus, unaltered from original appearance",
     },
   ],
 
@@ -198,12 +207,12 @@ const ROLE_TEMPLATES: Record<SceneRole, RoleTemplate[]> = {
     {
       subjectAction: (p) => `Person confidently picks up ${p.shortName} and demonstrates using it, close-up on their hands interacting with the product`,
       environment: (p) => `well-lit lifestyle setting, ${p.visualDescription}, product fills 40-60% of frame during close-up`,
-      continuityCues: "preserve exact product appearance from reference, do NOT add invented text or logos, smooth natural hand movements",
+      continuityCues: "preserve exact product appearance from reference, smooth natural hand movements",
     },
     {
       subjectAction: (p) => `Satisfying close-up of ${p.shortName} being opened or activated, then pull back to show person using it with a subtle smile`,
       environment: (p) => `clean surface, ${p.visualDescription}, camera starts tight macro then widens`,
-      continuityCues: "product proportions stay consistent, do NOT alter or add text/branding on any product surface",
+      continuityCues: "product proportions stay consistent between shots, surfaces unaltered",
     },
   ],
 
@@ -211,7 +220,7 @@ const ROLE_TEMPLATES: Record<SceneRole, RoleTemplate[]> = {
     {
       subjectAction: (p) => `Person looking directly at camera, holding ${p.shortName}, nodding with genuine satisfaction, then showing the result`,
       environment: (p) => `natural home or office setting, ${p.visualDescription}, eye-level camera angle`,
-      continuityCues: "authentic expression, not over-acted, product visible and unaltered, no invented text on product",
+      continuityCues: "authentic expression, not over-acted, product visible and unaltered from reference",
     },
     {
       subjectAction: (p) => `Before and after comparison: left side shows the old way, right side shows the result with ${p.shortName}`,
@@ -224,12 +233,12 @@ const ROLE_TEMPLATES: Record<SceneRole, RoleTemplate[]> = {
     {
       subjectAction: (p) => `${p.shortName} centered in frame on a clean surface, camera slowly pushing in, product is hero`,
       environment: (p) => `minimalist surface, ${p.visualDescription}, space left for text overlay on top third of frame`,
-      continuityCues: "product sharp and well-lit, do NOT render text ON the product that isn't in the original, leave negative space for post-production text overlay",
+      continuityCues: "product sharp and well-lit, leave negative space for post-production overlay",
     },
     {
       subjectAction: (p) => `Person holds up ${p.shortName} to camera with a confident smile, product at eye level, natural endorsement pose`,
       environment: (p) => `bright, clean background, ${p.visualDescription}, face and product both in focus`,
-      continuityCues: "product and face both sharp, product surface unaltered from reference, no hallucinated text or logos",
+      continuityCues: "product and face both sharp, product surface unaltered from reference",
     },
   ],
 
@@ -262,10 +271,9 @@ function formatForModel(prompt: string, modelId: string): string {
 
   switch (style) {
     case "concise": {
-      // Keep short for models that prefer brevity, but ALWAYS include the no-text rule
+      // Keep short for models that prefer brevity
       const sentences = prompt.split(/\.\s+/);
-      const core = sentences.slice(0, 3).join(". ") + ".";
-      return `${core} Do NOT add any text, labels, or logos onto the product.`;
+      return sentences.slice(0, 3).join(". ") + ".";
     }
 
     case "structured":

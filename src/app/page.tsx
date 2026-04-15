@@ -27,6 +27,7 @@ import { createDefaultBrandKit, brandKitToBrief, type BrandKit } from "@/lib/bra
 import { exportProjectFile, importProjectFile } from "@/lib/project-io";
 import { recordCost, getCostSummary, recordCostToDb } from "@/lib/cost-tracker";
 import { saveActiveJob, removeActiveJob } from "@/lib/job-recovery";
+import { persistVideo } from "@/lib/video-storage";
 import { type AudioTrack } from "@/lib/audio";
 import { MODEL_CATALOG, createDefaultStyleContext, type Scene, type StyleContext } from "@/types";
 
@@ -242,6 +243,14 @@ export default function Home() {
       removeActiveJob(scene.id);
       // Persist to cloud if signed in
       if (session?.user) recordCostToDb(completed, null);
+      // Persist video to Supabase Storage (runs in background, non-blocking)
+      if (result.videoUrl) {
+        persistVideo(result.videoUrl, scene.id).then((permanentUrl) => {
+          if (permanentUrl !== result.videoUrl) {
+            updateScene({ ...completed, videoUrl: permanentUrl });
+          }
+        });
+      }
 
       // Style Engine: extract frames and update reference bank
       const updatedCtx = await onSceneCompleted(completed, styleContext);
@@ -307,8 +316,40 @@ export default function Home() {
   };
 
   // ── Project Save/Load ──
-  const handleSaveProject = () => {
+  const [projectId, setProjectId] = useState<string | null>(null);
+  const [savedProjects, setSavedProjects] = useState<{ id: string; name: string; updated_at: string }[]>([]);
+  const [showProjectPicker, setShowProjectPicker] = useState(false);
+
+  const handleSaveProject = async () => {
     const name = prompt("Project name:", "My CutAgent Project") ?? "project";
+
+    // Save to Supabase if signed in
+    if (session?.user) {
+      try {
+        const body = { name, scenes, styleContext, audioTracks };
+        if (projectId) {
+          await fetch(`/api/projects/${projectId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+        } else {
+          const resp = await fetch("/api/projects", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+          if (resp.ok) {
+            const data = await resp.json();
+            setProjectId(data.id);
+          }
+        }
+      } catch {
+        // Cloud save failed — fall through to local
+      }
+    }
+
+    // Always also save as local JSON file
     exportProjectFile(name, scenes, styleContext, audioTracks);
   };
 
@@ -321,10 +362,40 @@ export default function Home() {
       if (project.styleContext) setStyleContext(project.styleContext);
       if (project.audioTracks) setAudioTracks(project.audioTracks);
       setSelectedScene(0);
+      setProjectId(null);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to load project");
     }
     if (projectFileInputRef.current) projectFileInputRef.current.value = "";
+  };
+
+  const handleLoadCloudProject = async (id: string) => {
+    try {
+      const resp = await fetch(`/api/projects/${id}`);
+      if (!resp.ok) return;
+      const data = await resp.json();
+      if (data.scenes) setScenes(scenesFromPartials(data.scenes));
+      if (data.style_context) setStyleContext(data.style_context);
+      if (data.audio_tracks) setAudioTracks(data.audio_tracks);
+      setProjectId(id);
+      setSelectedScene(0);
+      setShowProjectPicker(false);
+    } catch {
+      alert("Failed to load project from cloud");
+    }
+  };
+
+  const handleOpenProjectPicker = async () => {
+    if (session?.user) {
+      try {
+        const resp = await fetch("/api/projects");
+        if (resp.ok) {
+          const projects = await resp.json();
+          setSavedProjects(projects);
+        }
+      } catch { /* ignore */ }
+    }
+    setShowProjectPicker(true);
   };
 
   // ── Audio tracks (project-level music) ──
@@ -677,7 +748,7 @@ export default function Home() {
                   <button onClick={handleSaveProject} className="rounded-lg border border-white/8 bg-white/[0.04] hover:bg-white/[0.07] px-3 py-1.5 text-xs text-zinc-300 transition" title="Save">
                     Save
                   </button>
-                  <button onClick={() => projectFileInputRef.current?.click()} className="rounded-lg border border-white/8 bg-white/[0.04] hover:bg-white/[0.07] px-3 py-1.5 text-xs text-zinc-300 transition" title="Load">
+                  <button onClick={handleOpenProjectPicker} className="rounded-lg border border-white/8 bg-white/[0.04] hover:bg-white/[0.07] px-3 py-1.5 text-xs text-zinc-300 transition" title="Load">
                     Load
                   </button>
                   <input ref={projectFileInputRef} type="file" accept=".json" onChange={handleLoadProject} className="hidden" />
@@ -846,6 +917,50 @@ export default function Home() {
         onClose={() => setShowPreview(false)}
         scenes={scenes}
       />
+      {/* Project picker modal */}
+      {showProjectPicker && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-zinc-700 bg-zinc-900 p-6 shadow-2xl">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-bold text-zinc-100">Load Project</h2>
+              <button onClick={() => setShowProjectPicker(false)} className="text-zinc-500 hover:text-zinc-300">&times;</button>
+            </div>
+
+            {/* Cloud projects */}
+            {savedProjects.length > 0 && (
+              <div className="mb-4">
+                <p className="text-[10px] text-zinc-500 mb-2 uppercase tracking-wider">Saved projects</p>
+                <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                  {savedProjects.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => handleLoadCloudProject(p.id)}
+                      className="w-full text-left rounded-lg border border-zinc-700 bg-zinc-800/50 hover:bg-zinc-800 px-3 py-2.5 transition"
+                    >
+                      <span className="text-xs font-medium text-zinc-200 block">{p.name}</span>
+                      <span className="text-[10px] text-zinc-500">
+                        {new Date(p.updated_at).toLocaleDateString()} · {new Date(p.updated_at).toLocaleTimeString()}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Local file fallback */}
+            <div className="border-t border-zinc-800 pt-3">
+              <p className="text-[10px] text-zinc-500 mb-2">Or load from file</p>
+              <button
+                onClick={() => { projectFileInputRef.current?.click(); setShowProjectPicker(false); }}
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-800/50 hover:bg-zinc-800 px-3 py-2.5 text-xs text-zinc-300 transition"
+              >
+                Browse .json files...
+              </button>
+              <input ref={projectFileInputRef} type="file" accept=".json" onChange={handleLoadProject} className="hidden" />
+            </div>
+          </div>
+        </div>
+      )}
       {hookLabProduct && (
         <HookLab
           open={showHookLab}

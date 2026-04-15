@@ -1,5 +1,32 @@
-import type { Scene } from "@/types";
+import type { Scene, CaptionSegment } from "@/types";
 import type { AudioTrack } from "@/lib/audio";
+
+/**
+ * Build caption timing segments from scene data.
+ * Each scene's voiceoverText becomes a caption at the correct time offset.
+ */
+export function buildCaptionSegments(scenes: Scene[]): CaptionSegment[] {
+  const completed = scenes.filter((s) => s.videoUrl);
+  const segments: CaptionSegment[] = [];
+  let offset = 0;
+
+  for (const scene of completed) {
+    const trimmedDuration = (scene.trimEnd ?? scene.duration) - (scene.trimStart ?? 0);
+    const text = scene.voiceoverText?.trim();
+
+    if (text) {
+      segments.push({
+        text,
+        startTime: Math.round(offset * 100) / 100,
+        endTime: Math.round((offset + trimmedDuration) * 100) / 100,
+      });
+    }
+
+    offset += trimmedDuration;
+  }
+
+  return segments;
+}
 
 /**
  * Export completed scenes as a single MP4 with audio.
@@ -18,6 +45,7 @@ export async function exportProject(
   scenes: Scene[],
   audioTracks?: AudioTrack[],
   onProgress?: (msg: string) => void,
+  options?: { captions?: boolean },
 ): Promise<void> {
   const completed = scenes.filter((s) => s.videoUrl);
   if (completed.length === 0) {
@@ -39,7 +67,29 @@ export async function exportProject(
 
   // Use FFmpeg for stitching + audio mixing
   try {
-    await stitchWithFFmpeg(completed, audioTracks ?? [], onProgress);
+    const blob = await stitchWithFFmpeg(completed, audioTracks ?? [], onProgress);
+
+    // If captions requested, do a second pass server-side
+    const wantCaptions = options?.captions && completed.some((s) => s.voiceoverText?.trim());
+    if (wantCaptions) {
+      onProgress?.("Adding captions...");
+      const segments = buildCaptionSegments(completed);
+      if (segments.length > 0) {
+        try {
+          const captionedBlob = await addCaptionsServerSide(blob, segments);
+          triggerDownload(captionedBlob, "cutagent-export.mp4");
+          onProgress?.("Export complete (with captions)!");
+          return;
+        } catch (captionErr) {
+          console.warn("Caption rendering failed, downloading without captions:", captionErr);
+          onProgress?.("Captions failed — downloading without...");
+        }
+      }
+    }
+
+    // Download without captions (or if captions failed)
+    triggerDownload(blob, "cutagent-export.mp4");
+    onProgress?.("Export complete!");
     return;
   } catch (err) {
     console.warn("FFmpeg export failed:", err);
@@ -54,13 +104,45 @@ export async function exportProject(
 }
 
 /**
+ * Send stitched video + caption data to server for drawtext rendering.
+ */
+async function addCaptionsServerSide(videoBlob: Blob, segments: CaptionSegment[]): Promise<Blob> {
+  const formData = new FormData();
+  formData.append("video", videoBlob, "input.mp4");
+  formData.append("captions", JSON.stringify(segments));
+
+  const resp = await fetch("/api/add-captions", {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ error: "Unknown error" }));
+    throw new Error(err.error || "Caption server error");
+  }
+
+  return resp.blob();
+}
+
+function triggerDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/**
  * Stitch scenes + mix voiceovers and music into one MP4.
  */
 async function stitchWithFFmpeg(
   scenes: Scene[],
   audioTracks: AudioTrack[],
   onProgress?: (msg: string) => void,
-): Promise<void> {
+): Promise<Blob> {
   const { FFmpeg } = await import("@ffmpeg/ffmpeg");
   const { fetchFile } = await import("@ffmpeg/util");
 
@@ -221,22 +303,11 @@ async function stitchWithFFmpeg(
     await ffmpeg.exec(["-i", "video_only.mp4", "-c", "copy", "output.mp4"]);
   }
 
-  // ── Step 7: Download ──
-  onProgress?.("Preparing download...");
+  // ── Step 7: Return Blob ──
+  onProgress?.("Preparing file...");
   const outputData = await ffmpeg.readFile("output.mp4");
   const uint8 = outputData as Uint8Array;
-  const blob = new Blob([new Uint8Array(uint8)], { type: "video/mp4" });
-  const url = URL.createObjectURL(blob);
-
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "cutagent-export.mp4";
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-
-  onProgress?.("Export complete!");
+  return new Blob([new Uint8Array(uint8)], { type: "video/mp4" });
 }
 
 async function downloadVideo(url: string, filename: string): Promise<void> {

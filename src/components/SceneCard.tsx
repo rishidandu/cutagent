@@ -1,6 +1,7 @@
 "use client";
 
-import { MODEL_CATALOG, type Scene, type SceneRole, type StyleContext } from "@/types";
+import { useRef } from "react";
+import { MODEL_CATALOG, AVATAR_MODEL_CATALOG, type Scene, type SceneRole, type StyleContext } from "@/types";
 import { estimateSpeechDuration } from "@/lib/audio";
 
 const ROLE_COLORS: Record<SceneRole, string> = {
@@ -129,31 +130,61 @@ export default function SceneCard({
         </div>
       )}
 
-      {/* Model selector */}
-      <select
-        value={scene.modelId}
-        onChange={(e) => {
-          const newModel = MODEL_CATALOG.find((m) => m.id === e.target.value);
-          const newDuration = newModel?.supportedDurations[0] ?? scene.duration;
-          onUpdate({ ...scene, modelId: e.target.value, duration: newDuration });
-        }}
-        className="w-full rounded-lg bg-zinc-800 border border-zinc-700 px-3 py-2 text-xs focus:outline-none focus:border-blue-500"
-      >
-        {MODEL_CATALOG.map((m) => (
-          <option key={m.id} value={m.id}>
-            {m.name} — {m.bestFor} {m.consistency ? "" : "(no refs)"}
-          </option>
-        ))}
-      </select>
+      {/* Scene type toggle: Video / Avatar */}
+      <div className="flex gap-1">
+        <button
+          onClick={() => onUpdate({ ...scene, sceneType: "video" })}
+          className={`px-3 py-1 rounded-md text-[10px] font-medium transition ${
+            (scene.sceneType ?? "video") === "video"
+              ? "bg-blue-600 text-white"
+              : "bg-zinc-800 text-zinc-500 hover:text-zinc-300"
+          }`}
+        >
+          Video
+        </button>
+        <button
+          onClick={() => onUpdate({ ...scene, sceneType: "avatar", modelId: AVATAR_MODEL_CATALOG[0]?.id ?? scene.modelId })}
+          className={`px-3 py-1 rounded-md text-[10px] font-medium transition ${
+            scene.sceneType === "avatar"
+              ? "bg-purple-600 text-white"
+              : "bg-zinc-800 text-zinc-500 hover:text-zinc-300"
+          }`}
+        >
+          Avatar
+        </button>
+      </div>
 
-      {/* Prompt */}
-      <textarea
-        placeholder="Describe this scene..."
-        value={scene.prompt}
-        onChange={(e) => onUpdate({ ...scene, prompt: e.target.value })}
-        rows={3}
-        className="w-full rounded-lg bg-zinc-800 border border-zinc-700 px-3 py-2 text-sm placeholder:text-zinc-600 focus:outline-none focus:border-blue-500 resize-none"
-      />
+      {scene.sceneType === "avatar" ? (
+        <AvatarUI scene={scene} onUpdate={onUpdate} />
+      ) : (
+        <>
+          {/* Model selector */}
+          <select
+            value={scene.modelId}
+            onChange={(e) => {
+              const newModel = MODEL_CATALOG.find((m) => m.id === e.target.value);
+              const newDuration = newModel?.supportedDurations[0] ?? scene.duration;
+              onUpdate({ ...scene, modelId: e.target.value, duration: newDuration });
+            }}
+            className="w-full rounded-lg bg-zinc-800 border border-zinc-700 px-3 py-2 text-xs focus:outline-none focus:border-blue-500"
+          >
+            {MODEL_CATALOG.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name} — {m.bestFor} {m.consistency ? "" : "(no refs)"}
+              </option>
+            ))}
+          </select>
+
+          {/* Prompt */}
+          <textarea
+            placeholder="Describe this scene..."
+            value={scene.prompt}
+            onChange={(e) => onUpdate({ ...scene, prompt: e.target.value })}
+            rows={3}
+            className="w-full rounded-lg bg-zinc-800 border border-zinc-700 px-3 py-2 text-sm placeholder:text-zinc-600 focus:outline-none focus:border-blue-500 resize-none"
+          />
+        </>
+      )}
 
       {/* Voiceover script */}
       <div className="relative">
@@ -299,5 +330,68 @@ export default function SceneCard({
         </button>
       </div>
     </div>
+  );
+}
+
+// ── Avatar sub-component ──
+
+function AvatarUI({ scene, onUpdate }: { scene: Scene; onUpdate: (s: Scene) => void }) {
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const handleFaceUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => onUpdate({ ...scene, avatarImageUrl: reader.result as string });
+    reader.readAsDataURL(file);
+    if (fileRef.current) fileRef.current.value = "";
+  };
+
+  return (
+    <>
+      {/* Avatar model selector */}
+      <select
+        value={scene.modelId}
+        onChange={(e) => onUpdate({ ...scene, modelId: e.target.value })}
+        className="w-full rounded-lg bg-zinc-800 border border-purple-900/30 px-3 py-2 text-xs focus:outline-none focus:border-purple-500"
+      >
+        {AVATAR_MODEL_CATALOG.map((m) => (
+          <option key={m.id} value={m.id}>
+            {m.name} — {m.bestFor} (${m.costPerSec}/s)
+          </option>
+        ))}
+      </select>
+
+      {/* Face upload */}
+      <div className="space-y-1.5">
+        <span className="text-[10px] text-zinc-500">Face / portrait photo</span>
+        {scene.avatarImageUrl ? (
+          <div className="flex items-center gap-3">
+            <img
+              src={scene.avatarImageUrl}
+              alt="Avatar face"
+              className="h-16 w-16 rounded-xl object-cover border border-purple-700/30"
+            />
+            <div className="flex-1">
+              <p className="text-[10px] text-purple-300">Face uploaded</p>
+              <button
+                onClick={() => onUpdate({ ...scene, avatarImageUrl: undefined })}
+                className="text-[10px] text-zinc-500 hover:text-red-400 mt-0.5"
+              >
+                Remove
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            onClick={() => fileRef.current?.click()}
+            className="w-full rounded-lg border border-dashed border-purple-700/30 hover:border-purple-500/50 bg-purple-950/20 hover:bg-purple-950/30 px-4 py-4 text-xs text-purple-300/60 transition"
+          >
+            Click to upload a face photo
+          </button>
+        )}
+        <input ref={fileRef} type="file" accept="image/*" onChange={handleFaceUpload} className="hidden" />
+      </div>
+    </>
   );
 }

@@ -11,6 +11,7 @@
   "dependencies": {
     "@auth/supabase-adapter": "^1.11.1",
     "@fal-ai/client": "^1.9.5",
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@ffmpeg/ffmpeg": "^0.12.15",
     "@ffmpeg/util": "^0.12.2",
     "@supabase/supabase-js": "^2.103.0",

@@ -28,6 +28,7 @@ import { exportProjectFile, importProjectFile } from "@/lib/project-io";
 import { recordCost, getCostSummary, recordCostToDb } from "@/lib/cost-tracker";
 import { saveActiveJob, removeActiveJob } from "@/lib/job-recovery";
 import { persistVideo } from "@/lib/video-storage";
+import { generateAvatarVideo } from "@/lib/avatar";
 import { type AudioTrack } from "@/lib/audio";
 import { MODEL_CATALOG, createDefaultStyleContext, type Scene, type StyleContext } from "@/types";
 
@@ -83,6 +84,7 @@ function loadFromStorage(): { scenes: Scene[]; apiKey: string; styleContext?: St
       data.scenes = data.scenes.map((s: Record<string, unknown>) => ({
         ...s,
         role: s.role ?? "custom",
+        sceneType: s.sceneType ?? "video",
         trimStart: s.trimStart ?? 0,
         trimEnd: s.trimEnd ?? s.duration,
         voiceoverText: s.voiceoverText ?? "",
@@ -216,8 +218,72 @@ export default function Home() {
   };
 
   // ── Generate a single scene (using Style Engine) ──
+  // ── Generate avatar video (TTS first → then avatar endpoint) ──
+  const handleGenerateAvatar = async (scene: Scene) => {
+    if (!keySet) return;
+    if (!scene.avatarImageUrl) {
+      updateScene({ ...scene, error: "Upload a face photo first", status: "failed" });
+      return;
+    }
+    if (!scene.voiceoverText?.trim()) {
+      updateScene({ ...scene, error: "Write voiceover text first (avatar needs audio to drive lip sync)", status: "failed" });
+      return;
+    }
+
+    updateScene({ ...scene, status: "generating", progress: 10, error: undefined, videoUrl: undefined });
+
+    try {
+      // Step 1: Generate TTS voiceover
+      const ttsResult = await generateVoiceover({
+        text: scene.voiceoverText,
+        ttsModelId: voiceModelId,
+        voiceId,
+        sceneDuration: scene.duration,
+      });
+      updateScene({ ...scene, audioUrl: ttsResult.url, audioStatus: "completed", progress: 40, status: "generating" });
+
+      // Step 2: Generate avatar video with TTS audio
+      const avatarResult = await generateAvatarVideo({
+        avatarImageUrl: scene.avatarImageUrl,
+        audioUrl: ttsResult.url,
+        avatarModelId: scene.modelId,
+        onProgress: (status) => updateScene({ ...scene, status: "generating", progress: 70 }),
+      });
+
+      const completed = {
+        ...scene,
+        status: "completed" as const,
+        progress: 100,
+        videoUrl: avatarResult.videoUrl,
+        audioUrl: ttsResult.url,
+        audioStatus: "completed" as const,
+        requestId: avatarResult.requestId,
+      };
+      updateScene(completed);
+      recordCost(completed);
+      setTotalSpent(getCostSummary(scenes).totalSpent);
+      if (session?.user) recordCostToDb(completed, null);
+      if (avatarResult.videoUrl) {
+        persistVideo(avatarResult.videoUrl, scene.id).then((url) => {
+          if (url !== avatarResult.videoUrl) updateScene({ ...completed, videoUrl: url });
+        });
+      }
+    } catch (err) {
+      updateScene({
+        ...scene,
+        status: "failed",
+        progress: 0,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
   const handleGenerate = async (scene: Scene) => {
     if (!keySet) return;
+    // Route to avatar handler if scene type is avatar
+    if (scene.sceneType === "avatar") {
+      return handleGenerateAvatar(scene);
+    }
     updateScene({ ...scene, status: "generating", progress: 0, error: undefined, videoUrl: undefined });
 
     try {
@@ -302,11 +368,13 @@ export default function Home() {
   };
 
   // ── Export ──
+  const [exportWithCaptions, setExportWithCaptions] = useState(true);
+
   const handleExport = async () => {
     setIsExporting(true);
     setExportProgress("");
     try {
-      await exportProject(scenes, audioTracks, setExportProgress);
+      await exportProject(scenes, audioTracks, setExportProgress, { captions: exportWithCaptions });
     } catch (err) {
       alert(err instanceof Error ? err.message : "Export failed");
     } finally {
@@ -737,6 +805,17 @@ export default function Home() {
                   </button>
                   <button onClick={() => setShowPreview(true)} disabled={completedCount === 0} className="rounded-lg border border-white/8 bg-white/[0.04] hover:bg-white/[0.07] disabled:opacity-30 px-3 py-1.5 text-xs text-zinc-300 transition">
                     Preview
+                  </button>
+                  <button
+                    onClick={() => setExportWithCaptions((v) => !v)}
+                    className={`rounded-lg border px-2 py-1.5 text-[10px] font-medium transition ${
+                      exportWithCaptions
+                        ? "border-amber-500/30 bg-amber-500/10 text-amber-300"
+                        : "border-white/8 bg-white/[0.04] text-zinc-500"
+                    }`}
+                    title="Burn captions into exported video"
+                  >
+                    CC
                   </button>
                   <button
                     onClick={handleExport}

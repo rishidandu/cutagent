@@ -25,7 +25,7 @@ export interface GenerateOptions {
  * 3. Try browser fetch → if works, upload blob
  * 4. Fallback: proxy through our /api/proxy-image → upload blob
  */
-async function ensureHostedUrl(urlOrDataUrl: string): Promise<string> {
+export async function ensureHostedUrl(urlOrDataUrl: string): Promise<string> {
   // Already on fal.ai CDN
   if (urlOrDataUrl.includes("fal.media") || urlOrDataUrl.includes("fal.ai/files")) {
     return urlOrDataUrl;

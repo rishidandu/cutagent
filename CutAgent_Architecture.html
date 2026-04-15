@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CutAgent — Architecture Breakdown</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0a0a; color: #e0e0e0; line-height: 1.6; }
+
+  .container { max-width: 1200px; margin: 0 auto; padding: 40px 24px; }
+
+  h1 { font-size: 2rem; font-weight: 700; color: #fff; margin-bottom: 8px; }
+  .subtitle { color: #888; font-size: 1rem; margin-bottom: 48px; }
+
+  h2 { font-size: 1.4rem; font-weight: 600; color: #fff; margin: 48px 0 16px; }
+  h3 { font-size: 1.1rem; font-weight: 600; color: #ddd; margin: 24px 0 8px; }
+
+  .stats-bar { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 40px; }
+  .stat { background: #161616; border: 1px solid #2a2a2a; border-radius: 12px; padding: 16px 24px; flex: 1; min-width: 150px; }
+  .stat-value { font-size: 1.6rem; font-weight: 700; color: #60a5fa; }
+  .stat-label { font-size: 0.8rem; color: #888; margin-top: 4px; }
+
+  /* Architecture diagram */
+  .arch-diagram { display: flex; flex-direction: column; gap: 12px; margin: 24px 0; }
+
+  .layer { background: #161616; border: 1px solid #2a2a2a; border-radius: 12px; padding: 20px 24px; cursor: pointer; transition: all 0.2s; }
+  .layer:hover { border-color: #444; background: #1a1a1a; }
+  .layer.active { border-color: #60a5fa; background: #0d1b2a; }
+
+  .layer-header { display: flex; justify-content: space-between; align-items: center; }
+  .layer-name { font-weight: 600; font-size: 1.05rem; color: #fff; }
+  .layer-tag { font-size: 0.7rem; padding: 3px 10px; border-radius: 99px; font-weight: 500; }
+  .tag-ui { background: #1e3a5f; color: #60a5fa; }
+  .tag-engine { background: #1e3a1e; color: #4ade80; }
+  .tag-infra { background: #3a1e3a; color: #c084fc; }
+  .tag-api { background: #3a2a1e; color: #fb923c; }
+
+  .layer-files { font-size: 0.8rem; color: #666; margin-top: 4px; }
+  .layer-desc { font-size: 0.85rem; color: #aaa; margin-top: 4px; }
+
+  .layer-detail { display: none; margin-top: 16px; padding-top: 16px; border-top: 1px solid #2a2a2a; }
+  .layer.active .layer-detail { display: block; }
+
+  .detail-section { margin-bottom: 16px; }
+  .detail-section h4 { font-size: 0.85rem; font-weight: 600; color: #60a5fa; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .detail-section p { font-size: 0.85rem; color: #bbb; }
+  .detail-section code { background: #1e1e1e; padding: 2px 6px; border-radius: 4px; font-size: 0.8rem; color: #e0e0e0; }
+
+  .file-list { list-style: none; padding: 0; }
+  .file-list li { font-size: 0.8rem; color: #999; padding: 3px 0; font-family: 'SF Mono', 'Fira Code', monospace; }
+  .file-list li span { color: #60a5fa; }
+
+  /* Flow diagram */
+  .flow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 16px 0; }
+  .flow-step { background: #1e1e1e; border: 1px solid #333; border-radius: 8px; padding: 8px 14px; font-size: 0.8rem; color: #ddd; }
+  .flow-arrow { color: #555; font-size: 1.2rem; }
+  .flow-step.highlight { border-color: #60a5fa; color: #60a5fa; }
+
+  /* Model table */
+  .model-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; margin: 16px 0; }
+  .model-card { background: #161616; border: 1px solid #2a2a2a; border-radius: 8px; padding: 12px; }
+  .model-name { font-weight: 600; font-size: 0.9rem; color: #fff; }
+  .model-provider { font-size: 0.75rem; color: #888; }
+  .model-meta { display: flex; gap: 12px; margin-top: 6px; font-size: 0.75rem; color: #aaa; }
+  .model-meta span { display: flex; align-items: center; gap: 4px; }
+
+  /* Data flow */
+  .dataflow { background: #161616; border: 1px solid #2a2a2a; border-radius: 12px; padding: 24px; margin: 24px 0; }
+  .dataflow h3 { color: #fff; margin: 0 0 16px; }
+  .flow-row { display: flex; align-items: stretch; gap: 0; margin: 8px 0; }
+  .flow-box { background: #1e1e1e; border: 1px solid #333; border-radius: 8px; padding: 10px 14px; font-size: 0.8rem; flex: 1; }
+  .flow-box .flow-title { font-weight: 600; color: #fff; font-size: 0.85rem; margin-bottom: 4px; }
+  .flow-box .flow-body { color: #999; }
+  .flow-connector { display: flex; align-items: center; padding: 0 8px; color: #555; font-size: 1.4rem; }
+
+  /* Dependency map */
+  .dep-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
+  .dep-card { background: #161616; border: 1px solid #2a2a2a; border-radius: 10px; padding: 16px; }
+  .dep-card h4 { font-size: 0.9rem; color: #fff; margin-bottom: 8px; }
+  .dep-card ul { list-style: none; padding: 0; }
+  .dep-card li { font-size: 0.8rem; color: #aaa; padding: 2px 0; }
+  .dep-card li code { background: #1e1e1e; padding: 1px 5px; border-radius: 3px; font-size: 0.75rem; }
+
+  @media (max-width: 768px) {
+    .stats-bar { flex-direction: column; }
+    .dep-grid { grid-template-columns: 1fr; }
+    .model-grid { grid-template-columns: 1fr; }
+    .flow { flex-direction: column; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>CutAgent Architecture</h1>
+  <p class="subtitle">Complete system breakdown — click any layer to expand</p>
+
+  <div class="stats-bar">
+    <div class="stat"><div class="stat-value">5,810</div><div class="stat-label">Lines of TypeScript</div></div>
+    <div class="stat"><div class="stat-value">33</div><div class="stat-label">Source Files</div></div>
+    <div class="stat"><div class="stat-value">8</div><div class="stat-label">AI Video Models</div></div>
+    <div class="stat"><div class="stat-value">0</div><div class="stat-label">Backend Servers</div></div>
+  </div>
+
+  <h2>System Layers</h2>
+  <p style="color:#888; font-size:0.9rem; margin-bottom:16px;">The app is a single Next.js frontend with no backend for generation. All AI calls go directly from the browser to fal.ai. The only server-side code is 3 thin API routes for URL scraping and image proxying.</p>
+
+  <div class="arch-diagram">
+
+    <div class="layer" onclick="toggle(this)">
+      <div class="layer-header">
+        <div>
+          <div class="layer-name">UI Layer — React Components</div>
+          <div class="layer-files">11 components, 866-line page.tsx orchestrator</div>
+        </div>
+        <span class="layer-tag tag-ui">UI</span>
+      </div>
+      <div class="layer-desc">Storyboard editor, scene cards, timeline, modals, panels</div>
+      <div class="layer-detail">
+        <div class="detail-section">
+          <h4>How it works</h4>
+          <p>The main <code>page.tsx</code> (866 lines) is the orchestrator — it holds all state (scenes, style context, audio tracks, API key) and passes it down. There's no state management library; React <code>useState</code> handles everything. State is persisted to <code>localStorage</code> on every change so projects survive page refreshes.</p>
+        </div>
+        <div class="detail-section">
+          <h4>Components</h4>
+          <ul class="file-list">
+            <li><span>SceneCard.tsx</span> (303 lines) — Model selector, prompt editor, generation controls per scene</li>
+            <li><span>ProductImport.tsx</span> (293 lines) — Paste URL → scrape → auto-generate storyboard</li>
+            <li><span>StylePanel.tsx</span> (293 lines) — Style Harness controls, reference image bank, strength slider</li>
+            <li><span>BatchPanel.tsx</span> (233 lines) — Generate N variations with different hooks</li>
+            <li><span>AudioPanel.tsx</span> (219 lines) — TTS voiceover + music generation controls</li>
+            <li><span>CompareModal.tsx</span> (190 lines) — Side-by-side model comparison viewer</li>
+            <li><span>BrandKitPanel.tsx</span> (155 lines) — Brand colors, fonts, watermark settings</li>
+            <li><span>PreviewPlayer.tsx</span> (135 lines) — Full preview playback of stitched scenes</li>
+            <li><span>TemplateGallery.tsx</span> (134 lines) — 5 pre-built ad templates</li>
+            <li><span>ScriptImport.tsx</span> (104 lines) — Paste a script → AI splits into scenes</li>
+            <li><span>Timeline.tsx</span> (53 lines) — Bottom timeline bar showing scene sequence</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="layer" onclick="toggle(this)">
+      <div class="layer-header">
+        <div>
+          <div class="layer-name">Style Engine — Visual Consistency System</div>
+          <div class="layer-files">style-engine.ts + frame-extractor.ts + prompt-engine.ts = 714 lines</div>
+        </div>
+        <span class="layer-tag tag-engine">ENGINE</span>
+      </div>
+      <div class="layer-desc">The core differentiator — chains frames between scenes for cross-model visual consistency</div>
+      <div class="layer-detail">
+        <div class="detail-section">
+          <h4>Style Harness Pipeline</h4>
+          <div class="flow">
+            <div class="flow-step highlight">Scene N completes</div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-step">Extract last frame (canvas API)</div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-step">Upload to fal.storage</div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-step highlight">Feed as img2vid ref to Scene N+1</div>
+          </div>
+        </div>
+        <div class="detail-section">
+          <h4>Three subsystems</h4>
+          <p><strong>1. Frame Extractor</strong> (<code>frame-extractor.ts</code>, 183 lines): Extracts frames from video using HTML5 Canvas. Has a "best frame" scorer that samples 5 positions and picks the one with highest luminance variance (sharpest, most detailed). Also extracts last frame for chaining.</p>
+          <p style="margin-top:8px"><strong>2. Style Engine</strong> (<code>style-engine.ts</code>, 105 lines): Orchestrates the chaining. After each scene completes, it extracts the last frame, adds it to the reference bank (replacing stale entries), and plans generation order — sequential if chaining is on, parallel if off.</p>
+          <p style="margin-top:8px"><strong>3. Prompt Engine</strong> (<code>prompt-engine.ts</code>, 396 lines): The most sophisticated module. Generates model-optimized prompts per scene role (hook/problem/solution/proof/CTA). Has UGC and Studio style presets, role-specific visual templates, model-aware formatting (Kling=detailed, MiniMax=concise), and anti-hallucination fidelity rules to prevent models from adding fake text to products.</p>
+        </div>
+        <div class="detail-section">
+          <h4>Generation planning</h4>
+          <p><code>planGenerationOrder()</code> returns batches: with Style Harness on, each scene is its own batch (sequential). With it off, all scenes run in parallel. Hybrid mode is supported but not yet exposed in UI.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="layer" onclick="toggle(this)">
+      <div class="layer-header">
+        <div>
+          <div class="layer-name">Model Adapter Layer — Multi-Model Orchestration</div>
+          <div class="layer-files">model-adapters.ts (271 lines) + fal.ts (218 lines)</div>
+        </div>
+        <span class="layer-tag tag-engine">ENGINE</span>
+      </div>
+      <div class="layer-desc">Normalizes 8 different model APIs into one unified interface via adapter pattern</div>
+      <div class="layer-detail">
+        <div class="detail-section">
+          <h4>Adapter Pattern</h4>
+          <p>Each model (Kling, Veo, MiniMax, Wan, Seedance, Hunyuan, Luma) has its own adapter function that translates a universal <code>AdapterInput</code> into model-specific fal.ai endpoint + parameters. A regex-based registry routes model IDs to the correct adapter.</p>
+          <p style="margin-top:8px">Key differences handled: MiniMax doesn't accept <code>aspect_ratio</code> (hint goes in prompt instead). Wan needs <code>num_frames</code> not duration. Veo needs duration as <code>"5s"</code> string. Seedance has <code>generate_audio</code> toggle. MiniMax uses <code>subject_reference</code> for character refs vs <code>image_url</code> for others.</p>
+        </div>
+        <div class="detail-section">
+          <h4>fal.ai Client (<code>fal.ts</code>)</h4>
+          <p>Queue-based generation: submit → poll every 3s → fetch result. Handles image hosting (CDN detection, CORS proxy, data URL upload). Upscales thumbnail URLs from Shopify/Amazon/Demandware CDNs to full-size (fal.ai requires min 300×300). Max 15-minute timeout with 300 polls.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="layer" onclick="toggle(this)">
+      <div class="layer-header">
+        <div>
+          <div class="layer-name">Content Generation — Storyboards, Templates, Audio</div>
+          <div class="layer-files">storyboard-generator.ts + templates.ts + audio.ts = 724 lines</div>
+        </div>
+        <span class="layer-tag tag-engine">ENGINE</span>
+      </div>
+      <div class="layer-desc">Auto-generates ad storyboards from product data, applies templates, handles TTS + music</div>
+      <div class="layer-detail">
+        <div class="detail-section">
+          <h4>Storyboard Generator</h4>
+          <p>Takes scraped product data → produces 4-scene ad (Hook → Solution → Proof → CTA). Each role maps to a preferred model: Kling for action hooks, MiniMax for proof, Seedance for CTA with audio. Auto-generates voiceover scripts with word budgets based on scene duration (~2.8 words/sec). Picks from 5 different "ad angles" (convenience, quality, social proof, value, unboxing) randomly for variation.</p>
+        </div>
+        <div class="detail-section">
+          <h4>Template System</h4>
+          <p>5 templates: UGC Ad (9:16), Product Showcase (16:9), Explainer (16:9), Before/After (9:16), Social Proof (9:16). Each template assigns optimal model per scene and pre-fills prompts with <code>[PRODUCT]</code> placeholders. Duration clamping ensures template durations match model capabilities.</p>
+        </div>
+        <div class="detail-section">
+          <h4>Audio System</h4>
+          <p>TTS via Kokoro (10 voices, $0.02/1K chars) or ElevenLabs (6 voices, $0.05/1K chars). Music via CassetteAI or Stable Audio 2.5. Auto-fits voiceover to scene duration: if text is slightly over, speeds up to 1.3×; if way over, truncates at word boundary. All audio goes through fal.ai queue system.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="layer" onclick="toggle(this)">
+      <div class="layer-header">
+        <div>
+          <div class="layer-name">Server-Side Routes — Scraping & Proxying</div>
+          <div class="layer-files">3 API routes in src/app/api/</div>
+        </div>
+        <span class="layer-tag tag-api">API</span>
+      </div>
+      <div class="layer-desc">The only server-side code — scrapes product URLs and proxies images past CORS</div>
+      <div class="layer-detail">
+        <div class="detail-section">
+          <h4>Routes</h4>
+          <ul class="file-list">
+            <li><span>/api/scrape</span> (505 lines) — Product URL scraper. Tries Shopify JSON API first (/products/[handle].json), falls back to HTML meta + JSON-LD + OpenGraph extraction. Handles Shopify, Amazon, Etsy, eBay, and generic sites. Extracts title, description, price, images, brand, category, color, material.</li>
+            <li><span>/api/proxy-image</span> — CORS bypass. Many e-commerce CDNs (Shopify, Demandware) block browser cross-origin requests. This route fetches the image server-side and returns the blob.</li>
+            <li><span>/api/normalize-images</span> — Image preprocessing for fal.ai compatibility.</li>
+          </ul>
+        </div>
+        <div class="detail-section">
+          <h4>Entity Extraction (in scrape route)</h4>
+          <p>Goes beyond basic meta tags. Parses JSON-LD <code>@type: "Product"</code> blocks to extract structured entities: category, color, material, keywords. Falls back to keyword matching against known lists (60+ colors, 16 materials, 23 product shapes). These entities feed the prompt engine for much richer, more accurate prompts.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="layer" onclick="toggle(this)">
+      <div class="layer-header">
+        <div>
+          <div class="layer-name">Infrastructure — Export, Persistence, Cost Tracking</div>
+          <div class="layer-files">video-export.ts + project-io.ts + cost-tracker.ts + job-recovery.ts + undo.ts</div>
+        </div>
+        <span class="layer-tag tag-infra">INFRA</span>
+      </div>
+      <div class="layer-desc">FFmpeg.wasm stitching, localStorage persistence, cost tracking, project save/load</div>
+      <div class="layer-detail">
+        <div class="detail-section">
+          <h4>Video Export (<code>video-export.ts</code>, 185 lines)</h4>
+          <p>Single scene → direct download. Multiple scenes → FFmpeg.wasm stitching. Re-encodes with libx264 to normalize codecs/resolutions across different models. Mixes audio: voiceover at full volume + background music at 30% volume. Falls back to individual downloads if FFmpeg fails.</p>
+        </div>
+        <div class="detail-section">
+          <h4>Cost Tracker (<code>cost-tracker.ts</code>, 72 lines)</h4>
+          <p>Records every generation cost to localStorage (last 200 entries). Shows total spent + estimates remaining based on pending scenes × model cost/sec. Also has <code>recordCostToDb()</code> for cloud persistence via <code>/api/generations</code>.</p>
+        </div>
+        <div class="detail-section">
+          <h4>Project I/O (<code>project-io.ts</code>, 92 lines)</h4>
+          <p>Export: strips base64 data URLs and blob URLs to keep file size reasonable, saves as <code>.cutagent.json</code>. Import: reads JSON, migrates older versions that may lack new fields (role, trimStart, voiceoverText).</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2>Data Flow: Product URL → Video Ads</h2>
+  <div class="dataflow">
+    <div class="flow-row">
+      <div class="flow-box">
+        <div class="flow-title">1. Input</div>
+        <div class="flow-body">User pastes Shopify/Amazon URL</div>
+      </div>
+      <div class="flow-connector">→</div>
+      <div class="flow-box">
+        <div class="flow-title">2. Scrape</div>
+        <div class="flow-body">Server route fetches page, extracts product data via JSON-LD + meta tags + Shopify JSON API</div>
+      </div>
+      <div class="flow-connector">→</div>
+      <div class="flow-box">
+        <div class="flow-title">3. Storyboard</div>
+        <div class="flow-body">Prompt engine builds role-specific prompts. Model selector assigns best model per scene.</div>
+      </div>
+    </div>
+    <div class="flow-row" style="margin-top:12px">
+      <div class="flow-box">
+        <div class="flow-title">4. Generate</div>
+        <div class="flow-body">Adapters translate to model-specific fal.ai calls. Style Harness chains frames between scenes.</div>
+      </div>
+      <div class="flow-connector">→</div>
+      <div class="flow-box">
+        <div class="flow-title">5. Audio</div>
+        <div class="flow-body">TTS voiceover generated from auto-written scripts. Optional background music.</div>
+      </div>
+      <div class="flow-connector">→</div>
+      <div class="flow-box">
+        <div class="flow-title">6. Export</div>
+        <div class="flow-body">FFmpeg.wasm stitches scenes + audio into single MP4. Download to device.</div>
+      </div>
+    </div>
+  </div>
+
+  <h2>AI Model Catalog</h2>
+  <div class="model-grid">
+    <div class="model-card">
+      <div class="model-name">HunyuanVideo</div>
+      <div class="model-provider">Tencent</div>
+      <div class="model-meta"><span>$0.075/s</span><span>3-5s</span><span>img2vid ✓</span></div>
+    </div>
+    <div class="model-card">
+      <div class="model-name">MiniMax Live</div>
+      <div class="model-provider">MiniMax</div>
+      <div class="model-meta"><span>$0.10/s</span><span>3-6s</span><span>subject-ref ✓</span></div>
+    </div>
+    <div class="model-card">
+      <div class="model-name">Wan 2.5</div>
+      <div class="model-provider">Alibaba</div>
+      <div class="model-meta"><span>$0.05/s</span><span>3-5s</span><span>img2vid ✓</span></div>
+    </div>
+    <div class="model-card">
+      <div class="model-name">Kling 2.5 Turbo</div>
+      <div class="model-provider">Kuaishou</div>
+      <div class="model-meta"><span>$0.07/s</span><span>5-10s</span><span>img2vid ✓</span></div>
+    </div>
+    <div class="model-card">
+      <div class="model-name">Luma Ray 2</div>
+      <div class="model-provider">Luma</div>
+      <div class="model-meta"><span>$0.10/s</span><span>5s</span><span>img2vid ✓</span></div>
+    </div>
+    <div class="model-card">
+      <div class="model-name">Seedance 1.5</div>
+      <div class="model-provider">ByteDance</div>
+      <div class="model-meta"><span>$0.08/s</span><span>5-10s</span><span>img2vid ✓ audio ✓</span></div>
+    </div>
+    <div class="model-card">
+      <div class="model-name">Veo 2</div>
+      <div class="model-provider">Google</div>
+      <div class="model-meta"><span>$0.25/s</span><span>5-8s</span><span>img2vid ✓</span></div>
+    </div>
+    <div class="model-card">
+      <div class="model-name">Veo 3</div>
+      <div class="model-provider">Google</div>
+      <div class="model-meta"><span>$0.40/s</span><span>5-8s</span><span>img2vid ✓ audio ✓</span></div>
+    </div>
+  </div>
+
+  <h2>Dependencies</h2>
+  <div class="dep-grid">
+    <div class="dep-card">
+      <h4>Runtime (4 packages)</h4>
+      <ul>
+        <li><code>@fal-ai/client</code> — Direct browser-to-fal.ai generation</li>
+        <li><code>@ffmpeg/ffmpeg</code> + <code>@ffmpeg/util</code> — Client-side video stitching</li>
+        <li><code>lucide-react</code> — Icons</li>
+      </ul>
+    </div>
+    <div class="dep-card">
+      <h4>Framework</h4>
+      <ul>
+        <li><code>Next.js 15</code> + <code>React 19</code> — App framework</li>
+        <li><code>Tailwind CSS 4</code> — Styling</li>
+        <li><code>TypeScript 5.8</code> — Type safety throughout</li>
+      </ul>
+    </div>
+    <div class="dep-card">
+      <h4>No Backend Required</h4>
+      <ul>
+        <li>No database (localStorage for persistence)</li>
+        <li>No auth server (user provides own fal.ai key)</li>
+        <li>No file storage (videos hosted on fal.ai CDN)</li>
+        <li>No queue/worker (fal.ai handles job queue)</li>
+      </ul>
+    </div>
+    <div class="dep-card">
+      <h4>Key Design Decisions</h4>
+      <ul>
+        <li>Adapter pattern for multi-model support (easy to add models)</li>
+        <li>All generation client-side (no server costs)</li>
+        <li>Prompt engine is model-aware (formats differently per model)</li>
+        <li>Style Harness is opt-in (parallel when off, sequential when on)</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2>File Map</h2>
+  <div style="background:#161616; border:1px solid #2a2a2a; border-radius:12px; padding:20px 24px; font-family:'SF Mono','Fira Code',monospace; font-size:0.8rem; color:#888; line-height:1.8;">
+    <div>src/</div>
+    <div style="padding-left:20px">
+      <div>app/</div>
+      <div style="padding-left:20px">
+        <div><span style="color:#60a5fa">page.tsx</span> <span style="color:#555">— 866 lines — Main orchestrator, all state management</span></div>
+        <div><span style="color:#60a5fa">layout.tsx</span> <span style="color:#555">— App shell</span></div>
+        <div>api/</div>
+        <div style="padding-left:20px">
+          <div><span style="color:#fb923c">scrape/route.ts</span> <span style="color:#555">— 505 lines — Product URL scraper with JSON-LD + Shopify JSON</span></div>
+          <div><span style="color:#fb923c">proxy-image/route.ts</span> <span style="color:#555">— CORS bypass for CDN images</span></div>
+          <div><span style="color:#fb923c">normalize-images/route.ts</span> <span style="color:#555">— Image preprocessing</span></div>
+        </div>
+      </div>
+      <div>components/ <span style="color:#555">— 11 React components (2,344 lines total)</span></div>
+      <div>lib/ <span style="color:#555">— 14 modules (2,562 lines total)</span></div>
+      <div style="padding-left:20px">
+        <div><span style="color:#4ade80">prompt-engine.ts</span> <span style="color:#555">— 396 lines — Role-specific prompt generation with anti-hallucination</span></div>
+        <div><span style="color:#4ade80">audio.ts</span> <span style="color:#555">— 299 lines — TTS (Kokoro/ElevenLabs) + music (CassetteAI/Stable Audio)</span></div>
+        <div><span style="color:#4ade80">model-adapters.ts</span> <span style="color:#555">— 271 lines — 7 model-specific adapters + registry</span></div>
+        <div><span style="color:#4ade80">fal.ts</span> <span style="color:#555">— 218 lines — fal.ai SDK wrapper, queue polling, image hosting</span></div>
+        <div><span style="color:#4ade80">storyboard-generator.ts</span> <span style="color:#555">— 217 lines — Product → 4-scene ad with voiceovers</span></div>
+        <div><span style="color:#4ade80">templates.ts</span> <span style="color:#555">— 207 lines — 5 ad templates with model assignments</span></div>
+        <div><span style="color:#4ade80">video-export.ts</span> <span style="color:#555">— 185 lines — FFmpeg.wasm stitching + audio mixing</span></div>
+        <div><span style="color:#4ade80">frame-extractor.ts</span> <span style="color:#555">— 182 lines — Frame extraction + luminance scoring</span></div>
+        <div><span style="color:#4ade80">style-engine.ts</span> <span style="color:#555">— 105 lines — Style Harness chaining orchestrator</span></div>
+        <div><span style="color:#4ade80">project-io.ts</span> <span style="color:#555">— 92 lines — JSON project save/load</span></div>
+        <div><span style="color:#4ade80">cost-tracker.ts</span> <span style="color:#555">— 72 lines — Generation cost tracking + estimates</span></div>
+        <div><span style="color:#4ade80">job-recovery.ts</span> <span style="color:#555">— 62 lines — Recover in-flight jobs after page refresh</span></div>
+        <div><span style="color:#4ade80">undo.ts</span> <span style="color:#555">— 52 lines — Undo/redo stack</span></div>
+        <div><span style="color:#4ade80">brand-kit.ts</span> <span style="color:#555">— 46 lines — Brand colors, fonts, watermark</span></div>
+      </div>
+      <div>types/</div>
+      <div style="padding-left:20px">
+        <div><span style="color:#c084fc">index.ts</span> <span style="color:#555">— 270 lines — Model catalog, Scene/Project/StyleContext types</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function toggle(el) {
+  const wasActive = el.classList.contains('active');
+  document.querySelectorAll('.layer').forEach(l => l.classList.remove('active'));
+  if (!wasActive) el.classList.add('active');
+}
+</script>
+</body>
+</html>

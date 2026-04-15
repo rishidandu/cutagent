@@ -1,4 +1,4 @@
-import { MODEL_CATALOG, type Scene } from "@/types";
+import { MODEL_CATALOG, AVATAR_MODEL_CATALOG, type Scene } from "@/types";
 
 export interface CostEntry {
   sceneId: string;
@@ -21,7 +21,7 @@ const COST_KEY = "cutagent-costs";
  * Record a completed generation's cost.
  */
 export function recordCost(scene: Scene): void {
-  const model = MODEL_CATALOG.find((m) => m.id === scene.modelId);
+  const model = MODEL_CATALOG.find((m) => m.id === scene.modelId) ?? AVATAR_MODEL_CATALOG.find((m) => m.id === scene.modelId);
   if (!model) return;
 
   const entry: CostEntry = {
@@ -57,7 +57,7 @@ export function getCostSummary(scenes: Scene[]): CostSummary {
   const estimateRemaining = scenes
     .filter((s) => s.status === "idle" || s.status === "queued")
     .reduce((s, sc) => {
-      const model = MODEL_CATALOG.find((m) => m.id === sc.modelId);
+      const model = MODEL_CATALOG.find((m) => m.id === sc.modelId) ?? AVATAR_MODEL_CATALOG.find((m) => m.id === sc.modelId);
       return s + (model?.costPerSec ?? 0) * sc.duration;
     }, 0);
 
@@ -79,7 +79,7 @@ export async function recordCostToDb(
   scene: Scene,
   projectId: string | null,
 ): Promise<void> {
-  const model = MODEL_CATALOG.find((m) => m.id === scene.modelId);
+  const model = MODEL_CATALOG.find((m) => m.id === scene.modelId) ?? AVATAR_MODEL_CATALOG.find((m) => m.id === scene.modelId);
   if (!model) return;
 
   try {

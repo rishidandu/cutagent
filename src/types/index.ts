@@ -228,11 +228,53 @@ export type SceneStatus = "idle" | "queued" | "generating" | "completed" | "fail
 /** Scene role in the ad framework (Hook-Problem-Solution-Proof-CTA) */
 export type SceneRole = "hook" | "problem" | "solution" | "proof" | "cta" | "custom";
 
+// ── Caption types ──
+
+export interface CaptionSegment {
+  text: string;
+  startTime: number;
+  endTime: number;
+}
+
+// ── Avatar model catalog ──
+
+export interface AvatarModelInfo {
+  id: string;
+  name: string;
+  falEndpoint: string;
+  costPerSec: number;
+  maxDuration: number;
+  bestFor: string;
+}
+
+export const AVATAR_MODEL_CATALOG: AvatarModelInfo[] = [
+  {
+    id: "sadtalker",
+    name: "SadTalker",
+    falEndpoint: "fal-ai/sadtalker",
+    costPerSec: 0.02,
+    maxDuration: 60,
+    bestFor: "Cheapest, good lip sync",
+  },
+  {
+    id: "kling-avatar-v2",
+    name: "Kling Avatar v2",
+    falEndpoint: "fal-ai/kling-video/ai-avatar/v2/standard",
+    costPerSec: 0.056,
+    maxDuration: 30,
+    bestFor: "High quality, natural motion",
+  },
+];
+
+// ── Scene types ──
+
 export interface Scene {
   id: string;
   index: number;
   /** Scene's role in the ad structure — drives prompt style and visual treatment */
   role: SceneRole;
+  /** Scene generation type: regular AI video or avatar/talking head */
+  sceneType?: "video" | "avatar";
   modelId: string;
   prompt: string;
   duration: number;
@@ -259,6 +301,8 @@ export interface Scene {
   error?: string;
   /** @deprecated Use StyleContext.references instead */
   referenceImageUrl?: string;
+  /** For avatar scenes: uploaded face/portrait image URL */
+  avatarImageUrl?: string;
 }
 
 export interface Project {

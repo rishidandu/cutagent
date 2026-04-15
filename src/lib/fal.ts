@@ -149,9 +149,18 @@ export async function generateScene({ scene, styleContext, onProgress }: Generat
   try {
     submitResult = await fal.queue.submit(endpointId, { input });
   } catch (submitErr: unknown) {
-    // fal SDK: ValidationError has .body with real info, .message is often empty
+    // Handle various error shapes from fal SDK:
+    // - ValidationError: { body: { detail: "..." }, status: 422 }
+    // - Network/WebSocket: Event object or string
+    // - Generic: Error with message
+    if (submitErr instanceof Event) {
+      throw new Error(`[${endpointId}] Connection failed — check your API key and network`);
+    }
+    if (typeof submitErr === "string") {
+      throw new Error(`[${endpointId}] ${submitErr}`);
+    }
     const e = submitErr as { body?: { detail?: string } | string; message?: string; status?: number; name?: string };
-    const bodyDetail = typeof e?.body === "string" ? e.body : e?.body?.detail ?? JSON.stringify(e?.body);
+    const bodyDetail = typeof e?.body === "string" ? e.body : e?.body?.detail ?? "";
     const detail = bodyDetail || e?.message || `${e?.name ?? "Error"} (status ${e?.status ?? "?"})`;
     throw new Error(`[${endpointId}] ${detail}`);
   }
@@ -172,13 +181,15 @@ export async function generateScene({ scene, styleContext, onProgress }: Generat
         logs: true,
       });
     } catch (pollErr: unknown) {
+      // WebSocket/network Event — retry
+      if (pollErr instanceof Event) continue;
       const pe = pollErr as { body?: unknown; message?: string; name?: string; status?: number };
-      // Validation errors are fatal, network errors can retry
+      // Validation errors are fatal
       if (pe?.name === "ValidationError" || pe?.status === 422 || pe?.status === 400) {
         const bodyDetail = typeof pe?.body === "string" ? pe.body : (pe?.body as { detail?: string })?.detail ?? JSON.stringify(pe?.body);
         throw new Error(`[${endpointId}] ${bodyDetail || pe?.message || "Validation error"}`);
       }
-      // Network error — retry
+      // Other network errors — retry
       continue;
     }
 

@@ -169,7 +169,7 @@ export async function generateScene({ scene, styleContext, onProgress }: Generat
 
   // Poll with full endpoint ID to avoid SDK path-truncation bug
   const POLL_INTERVAL = 3000;
-  const MAX_POLLS = 200; // ~10 minutes
+  const MAX_POLLS = 300; // ~15 minutes (some models like HunyuanVideo img2vid are slow)
 
   for (let i = 0; i < MAX_POLLS; i++) {
     await new Promise((r) => setTimeout(r, POLL_INTERVAL));

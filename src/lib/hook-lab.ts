@@ -122,8 +122,11 @@ export function planHookVariations(
       // Pick shortest duration this model supports (cheapest)
       const duration = model.supportedDurations[0];
 
-      // Build prompt: style template with product name + UGC hook prefix + fidelity
-      const styledPrompt = style.template.replace(/\{product\}/g, productName);
+      // Build prompt: style template with product name + visual description + UGC hook prefix
+      const productWithVisual = productCtx.visualDescription
+        ? `${productName} (${productCtx.visualDescription})`
+        : productName;
+      const styledPrompt = style.template.replace(/\{product\}/g, productWithVisual);
       const fullPrompt = `${prefix.visualStyle}. ${styledPrompt}. ${prefix.cameraFeel}, ${prefix.lighting}. ${prefix.fidelity}.`;
 
       variations.push({

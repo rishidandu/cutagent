@@ -32,12 +32,17 @@ export interface AdapterOutput {
  * Prepend the style brief to the scene's prompt.
  * Brief goes first because fal.ai models weight the beginning of prompts more heavily.
  */
+/**
+ * Prepend the style brief to the scene's prompt.
+ * Only includes non-empty fields. Removes "X:" prefixes — models respond
+ * better to natural language than structured labels.
+ */
 export function augmentPrompt(basePrompt: string, brief: StyleBrief): string {
   const parts: string[] = [];
   if (brief.description.trim()) parts.push(brief.description.trim());
-  if (brief.lighting.trim()) parts.push(`Lighting: ${brief.lighting.trim()}`);
-  if (brief.colorPalette.trim()) parts.push(`Color palette: ${brief.colorPalette.trim()}`);
-  if (brief.characterDescription.trim()) parts.push(`Character: ${brief.characterDescription.trim()}`);
+  if (brief.characterDescription.trim()) parts.push(brief.characterDescription.trim());
+  if (brief.lighting.trim()) parts.push(brief.lighting.trim());
+  if (brief.colorPalette.trim()) parts.push(brief.colorPalette.trim());
   if (parts.length === 0) return basePrompt;
   return `${parts.join(". ")}. ${basePrompt}`;
 }
@@ -67,6 +72,8 @@ function buildKlingRequest({ scene, model, brief, references, strength }: Adapte
     negative_prompt: NEGATIVE_PROMPT,
     aspect_ratio: scene.aspectRatio,
     duration: `${scene.duration}`,
+    // Higher cfg_scale = stricter prompt adherence (better for product fidelity)
+    cfg_scale: 0.7,
   };
 
   if (hasRefs) {
@@ -206,11 +213,13 @@ function buildVeoRequest({ scene, model, brief, references }: AdapterInput): Ada
   const prompt = augmentPrompt(scene.prompt, brief);
   // Veo accepts '5s','6s','7s','8s' only — clamp and add 's' suffix
   const veoDur = Math.max(5, Math.min(8, Math.round(scene.duration)));
+  // Use 1080p for CTA/solution (hero shots benefit from higher res), 720p for others
+  const resolution = scene.role === "cta" || scene.role === "solution" ? "1080p" : "720p";
   const input: Record<string, unknown> = {
     prompt,
     aspect_ratio: scene.aspectRatio,
     duration: `${veoDur}s`,
-    resolution: "720p",
+    resolution,
   };
 
   // Enable native audio for Veo 3, but disable if scene has voiceover text

@@ -26,10 +26,10 @@ const AD_STRUCTURE: {
   modelPref: string;
   modelFallback: string;
 }[] = [
-  { role: "hook",     modelPref: "Kling 2.5 Turbo", modelFallback: "MiniMax Live" },
-  { role: "solution", modelPref: "Kling 2.5 Turbo", modelFallback: "Veo 2" },
-  { role: "proof",    modelPref: "MiniMax Live",     modelFallback: "Kling 2.5 Turbo" },
-  { role: "cta",      modelPref: "Seedance 1.5",     modelFallback: "Veo 2" },
+  { role: "hook",     modelPref: "Kling 2.5 Turbo", modelFallback: "Seedance 1.5" },  // Motion + energy
+  { role: "solution", modelPref: "Kling 2.5 Turbo", modelFallback: "Veo 2" },        // Detail + clarity
+  { role: "proof",    modelPref: "Kling 2.5 Turbo", modelFallback: "Seedance 1.5" }, // Authenticity (was MiniMax — too low quality)
+  { role: "cta",      modelPref: "Veo 2",            modelFallback: "Luma Ray 2" },   // Realism + premium hero shot (was Seedance — overkill)
 ];
 
 /**
@@ -41,16 +41,19 @@ export function generateProductStoryboard(product: ProductData): Omit<Scene, "id
   // First pass: resolve models and durations for each scene
   const scenePlan = AD_STRUCTURE.map((s) => {
     const model = findModel(s.modelPref) ?? findModel(s.modelFallback) ?? MODEL_CATALOG[0];
-    // Pick duration based on scene role:
-    // - Hook: short and punchy (use shortest)
-    // - Solution/Proof: medium (use middle or first)
-    // - CTA: short (use shortest)
+    // Duration strategy per role:
+    // - Hook: medium (needs time for pattern interrupt payoff, not too rushed)
+    // - Solution: longer (product reveal needs breathing room)
+    // - Proof: medium (authentic moment)
+    // - CTA: longer (slow cinematic push-in, premium feel)
     const durations = model.supportedDurations;
     let dur: number;
-    if (s.role === "hook" || s.role === "cta") {
-      dur = durations[0]; // shortest
+    if (s.role === "hook") {
+      dur = durations.length > 1 ? durations[1] : durations[0]; // 2nd shortest (usually 5s)
+    } else if (s.role === "solution" || s.role === "cta") {
+      dur = durations[Math.min(durations.length - 1, 1)]; // longest available (or 2nd)
     } else {
-      dur = durations.length > 1 ? durations[1] : durations[0]; // second option or shortest
+      dur = durations.length > 1 ? durations[1] : durations[0]; // medium
     }
     return { ...s, model, duration: dur };
   });

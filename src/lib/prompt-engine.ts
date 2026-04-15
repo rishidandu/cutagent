@@ -58,7 +58,7 @@ const PRODUCT_FIDELITY =
  * is far more effective at preventing text hallucination.
  */
 export const NEGATIVE_PROMPT =
-  "text, words, letters, numbers, labels, logos, watermarks, subtitles, captions, writing, brand names, slogans, signs, stamps, badges, stickers, UI elements, blurry, distorted, low quality, deformed";
+  "text, words, letters, numbers, labels, logos, watermarks, subtitles, captions, writing, brand names, slogans, signs, stamps, badges, stickers, UI elements, blurry, distorted, low quality, deformed, flicker, jitter, morphing, warping, duplicate objects, multiple copies, extra limbs, extra fingers, mirror errors, glitch artifacts, modified product, altered product details, wrong color variant, unnatural proportions, oversaturated, underexposed";
 
 export type AdStyle = "ugc" | "studio" | "custom";
 

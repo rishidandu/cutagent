@@ -102,27 +102,30 @@ export default function HookLab({ open, onClose, product, styleContext, onExpand
           };
           try {
             // Use text-to-video (no image refs) for cheap hook testing
-            // Keep the brief for prompt context, but strip references
-            // so the adapter doesn't route to img2vid endpoints
             const hookStyleContext = {
               ...styleContext,
               references: [],
               autoChainLastFrame: false,
             };
+            console.log(`[HookLab] Generating hook ${globalIdx + 1}/${planned.length}: ${v.hookStyleLabel} / ${v.modelName}`);
+            console.log(`[HookLab] Prompt (first 100): ${v.prompt.slice(0, 100)}`);
             const result = await generateScene({
               scene: hookScene as Scene,
               styleContext: hookStyleContext,
             });
+            console.log(`[HookLab] Hook ${globalIdx + 1} completed: ${result.videoUrl?.slice(0, 60)}`);
             setVariations((prev) =>
               prev.map((item, j) =>
                 j === globalIdx ? { ...item, status: "completed" as const, videoUrl: result.videoUrl } : item,
               ),
             );
           } catch (err) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            console.error(`[HookLab] Hook ${globalIdx + 1} FAILED: ${errMsg}`);
             setVariations((prev) =>
               prev.map((item, j) =>
                 j === globalIdx
-                  ? { ...item, status: "failed" as const, error: err instanceof Error ? err.message : String(err) }
+                  ? { ...item, status: "failed" as const, error: errMsg }
                   : item,
               ),
             );

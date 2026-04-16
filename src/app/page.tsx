@@ -16,6 +16,7 @@ import CompareModal from "@/components/CompareModal";
 import PreviewPlayer from "@/components/PreviewPlayer";
 import UserMenu from "@/components/UserMenu";
 import HookLab from "@/components/HookLab";
+import ProjectSidebar from "@/components/ProjectSidebar";
 import { configureFal, generateScene } from "@/lib/fal";
 import { TTS_MODELS, generateVoiceover } from "@/lib/audio";
 import { exportProject } from "@/lib/video-export";
@@ -466,6 +467,68 @@ export default function Home() {
     setShowProjectPicker(true);
   };
 
+  // ── Sidebar: fetch projects on mount ──
+  const fetchProjects = async () => {
+    if (!session?.user) return;
+    try {
+      const resp = await fetch("/api/projects");
+      if (resp.ok) setSavedProjects(await resp.json());
+    } catch { /* ignore */ }
+  };
+
+  useEffect(() => { fetchProjects(); }, [session?.user?.id]);
+
+  // ── Sidebar: new project ──
+  const handleNewProject = () => {
+    setScenes([makeScene(0)]);
+    setStyleContext(createDefaultStyleContext());
+    setAudioTracks([]);
+    setProjectId(null);
+    setSelectedScene(0);
+  };
+
+  // ── Sidebar: delete project ──
+  const handleDeleteProject = async (id: string) => {
+    try {
+      await fetch(`/api/projects/${id}`, { method: "DELETE" });
+      setSavedProjects((prev) => prev.filter((p) => p.id !== id));
+      if (projectId === id) handleNewProject();
+    } catch { /* ignore */ }
+  };
+
+  // ── Auto-save to cloud (debounced 3s) ──
+  const cloudSaveTimer = useRef<NodeJS.Timeout>(undefined);
+  useEffect(() => {
+    if (!session?.user || !mountedRef.current) return;
+    clearTimeout(cloudSaveTimer.current);
+    cloudSaveTimer.current = setTimeout(async () => {
+      // Only auto-save if there's actual content
+      if (!scenes.some((s) => s.prompt.trim() || s.videoUrl)) return;
+      try {
+        const body = { name: "Untitled", scenes, styleContext, audioTracks };
+        if (projectId) {
+          await fetch(`/api/projects/${projectId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+        } else {
+          const resp = await fetch("/api/projects", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+          if (resp.ok) {
+            const data = await resp.json();
+            setProjectId(data.id);
+            fetchProjects(); // Refresh sidebar
+          }
+        }
+      } catch { /* silent */ }
+    }, 3000);
+    return () => clearTimeout(cloudSaveTimer.current);
+  }, [scenes, styleContext, audioTracks, session?.user?.id]);
+
   // ── Audio tracks (project-level music) ──
   const addAudioTrack = (track: AudioTrack) => setAudioTracks((prev) => [...prev, track]);
   const removeAudioTrack = (id: string) => setAudioTracks((prev) => prev.filter((t) => t.id !== id));
@@ -739,6 +802,15 @@ export default function Home() {
 
       {/* Main */}
       <div className="relative z-10 flex flex-1 overflow-hidden">
+        {/* Project sidebar (ChatGPT-style) */}
+        <ProjectSidebar
+          projects={savedProjects}
+          activeProjectId={projectId}
+          onSelectProject={handleLoadCloudProject}
+          onNewProject={handleNewProject}
+          onDeleteProject={handleDeleteProject}
+          visible={!!session?.user}
+        />
         <main className="flex-1 overflow-y-auto px-4 py-6 sm:px-6">
           <div className="mx-auto max-w-6xl">
             {/* ── Product URL Import (primary CTA) ── */}
@@ -827,8 +899,8 @@ export default function Home() {
                   <button onClick={handleSaveProject} className="rounded-lg border border-white/8 bg-white/[0.04] hover:bg-white/[0.07] px-3 py-1.5 text-xs text-zinc-300 transition" title="Save">
                     Save
                   </button>
-                  <button onClick={handleOpenProjectPicker} className="rounded-lg border border-white/8 bg-white/[0.04] hover:bg-white/[0.07] px-3 py-1.5 text-xs text-zinc-300 transition" title="Load">
-                    Load
+                  <button onClick={() => projectFileInputRef.current?.click()} className="rounded-lg border border-white/8 bg-white/[0.04] hover:bg-white/[0.07] px-3 py-1.5 text-xs text-zinc-300 transition" title="Import .json file">
+                    Import
                   </button>
                   <input ref={projectFileInputRef} type="file" accept=".json" onChange={handleLoadProject} className="hidden" />
                 </div>

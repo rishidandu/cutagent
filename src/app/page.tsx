@@ -559,7 +559,14 @@ export default function Home() {
         if (!session?.user) saveLocalProjectList(updated);
         return updated;
       });
-      if (projectId === id) handleNewProject();
+      // If we deleted the active project, just clear the editor (don't create a new one)
+      if (projectId === id) {
+        setScenes([makeScene(0)]);
+        setStyleContext(createDefaultStyleContext());
+        setAudioTracks([]);
+        setProjectId(null);
+        setSelectedScene(0);
+      }
     } catch { /* ignore */ }
   };
 

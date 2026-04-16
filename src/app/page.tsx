@@ -390,7 +390,8 @@ export default function Home() {
   const [showProjectPicker, setShowProjectPicker] = useState(false);
 
   const handleSaveProject = async () => {
-    const name = prompt("Project name:", "My CutAgent Project") ?? "project";
+    const autoName = deriveProjectName();
+    const name = prompt("Project name:", autoName) ?? autoName;
 
     // Save to Supabase if signed in
     if (session?.user) {
@@ -529,6 +530,35 @@ export default function Home() {
     } catch { /* ignore */ }
   };
 
+  // ── Smart project naming — derive name from content ──
+  const deriveProjectName = (): string => {
+    // 1. From style brief (product name is in here after URL import)
+    const brief = styleContext?.brief?.description ?? "";
+    const productMatch = brief.match(/Product:\s*([^.]+)/);
+    if (productMatch?.[1]?.trim()) {
+      return productMatch[1].trim().slice(0, 40);
+    }
+
+    // 2. From first scene prompt (first meaningful words)
+    const firstPrompt = scenes.find((s) => s.prompt?.trim())?.prompt ?? "";
+    if (firstPrompt.length > 10) {
+      // Strip the style prefix to get the actual content
+      const stripped = firstPrompt
+        .replace(/^(UGC style|Fast-paced|Professional|Satisfying|Authentic|Clean hero)[^.]*\.\s*/i, "")
+        .replace(/^(vertical|horizontal|square)[^.]*\.\s*/i, "");
+      const words = stripped.split(/\s+/).slice(0, 5).join(" ");
+      if (words.length > 5) return words.slice(0, 40);
+    }
+
+    // 3. From first scene voiceover
+    const firstVO = scenes.find((s) => s.voiceoverText?.trim())?.voiceoverText ?? "";
+    if (firstVO.length > 5) {
+      return firstVO.slice(0, 40);
+    }
+
+    return "Untitled";
+  };
+
   // ── Auto-save (debounced 3s) — cloud when signed in, localStorage when not ──
   const cloudSaveTimer = useRef<NodeJS.Timeout>(undefined);
   useEffect(() => {
@@ -541,7 +571,7 @@ export default function Home() {
       if (session?.user) {
         // Cloud save
         try {
-          const body = { name: "Untitled", scenes, styleContext, audioTracks };
+          const body = { name: deriveProjectName(), scenes, styleContext, audioTracks };
           if (projectId) {
             await fetch(`/api/projects/${projectId}`, {
               method: "PUT",
@@ -565,7 +595,7 @@ export default function Home() {
         // Local save — store project in localStorage project list
         const id = projectId || `local-${Date.now()}`;
         if (!projectId) setProjectId(id);
-        const projectEntry = { id, name: "Untitled", updated_at: new Date().toISOString() };
+        const projectEntry = { id, name: deriveProjectName(), updated_at: new Date().toISOString() };
         const projectData = { scenes, styleContext, audioTracks };
         try {
           localStorage.setItem(`cutagent-project-${id}`, JSON.stringify(projectData));

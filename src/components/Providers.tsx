@@ -1,12 +1,12 @@
 "use client";
 
 import { SessionProvider } from "next-auth/react";
+import { CreditsProvider } from "@/components/CreditsProvider";
 
 /**
  * Client-side providers wrapper.
- * Always includes SessionProvider so useSession() works everywhere.
- * When auth is not configured, SessionProvider fetches /api/auth/session
- * which returns an empty session — harmless.
+ * SessionProvider: auth context
+ * CreditsProvider: billing credits + tier (graceful degrades when Stripe not configured)
  */
 export default function Providers({ children }: { children: React.ReactNode }) {
   return (
@@ -14,7 +14,7 @@ export default function Providers({ children }: { children: React.ReactNode }) {
       refetchInterval={0}
       refetchOnWindowFocus={false}
     >
-      {children}
+      <CreditsProvider>{children}</CreditsProvider>
     </SessionProvider>
   );
 }

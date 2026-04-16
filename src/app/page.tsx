@@ -15,6 +15,9 @@ import BrandKitPanel from "@/components/BrandKitPanel";
 import CompareModal from "@/components/CompareModal";
 import PreviewPlayer from "@/components/PreviewPlayer";
 import UserMenu from "@/components/UserMenu";
+import CreditsBadge from "@/components/CreditsBadge";
+import UpgradeModal from "@/components/UpgradeModal";
+import { useCredits } from "@/components/CreditsProvider";
 import HookLab from "@/components/HookLab";
 import ProjectSidebar from "@/components/ProjectSidebar";
 import { configureFal, generateScene } from "@/lib/fal";
@@ -132,6 +135,11 @@ export default function Home() {
   const [hookLabProduct, setHookLabProduct] = useState<ProductData | null>(null);
   const [showPreview, setShowPreview] = useState(false);
   const [compareScene, setCompareScene] = useState<Scene | null>(null);
+  const [showUpgrade, setShowUpgrade] = useState(false);
+  const [upgradeReason, setUpgradeReason] = useState<"out_of_credits" | "manual">("manual");
+
+  // Billing credits
+  const { creditsCents, configured: stripeConfigured, refresh: refreshCredits } = useCredits();
 
   // Voice settings
   const [voiceModelId, setVoiceModelId] = useState(TTS_MODELS[0].id);
@@ -218,10 +226,24 @@ export default function Home() {
     setKeySet(true);
   };
 
+  // ── Credits pre-flight check ──
+  const checkCreditsOrUpgrade = (scene: Scene): boolean => {
+    if (!stripeConfigured || creditsCents === null) return true;
+    const model = MODEL_CATALOG.find((m) => m.id === scene.modelId);
+    const estimate = model ? Math.ceil(model.costPerSec * scene.duration * 100) : 0;
+    if (creditsCents < estimate) {
+      setUpgradeReason("out_of_credits");
+      setShowUpgrade(true);
+      return false;
+    }
+    return true;
+  };
+
   // ── Generate a single scene (using Style Engine) ──
   // ── Generate avatar video (TTS first → then avatar endpoint) ──
   const handleGenerateAvatar = async (scene: Scene) => {
     if (!keySet) return;
+    if (!checkCreditsOrUpgrade(scene)) return;
     if (!scene.avatarImageUrl) {
       updateScene({ ...scene, error: "Upload a face photo first", status: "failed" });
       return;
@@ -263,7 +285,10 @@ export default function Home() {
       updateScene(completed);
       recordCost(completed);
       setTotalSpent(getCostSummary(scenes).totalSpent);
-      if (session?.user) recordCostToDb(completed, null);
+      if (session?.user) {
+        recordCostToDb(completed, null);
+        refreshCredits();
+      }
       if (avatarResult.videoUrl) {
         persistVideo(avatarResult.videoUrl, scene.id).then((url) => {
           if (url !== avatarResult.videoUrl) updateScene({ ...completed, videoUrl: url });
@@ -281,6 +306,7 @@ export default function Home() {
 
   const handleGenerate = async (scene: Scene) => {
     if (!keySet) return;
+    if (!checkCreditsOrUpgrade(scene)) return;
     // Route to avatar handler if scene type is avatar
     if (scene.sceneType === "avatar") {
       return handleGenerateAvatar(scene);
@@ -309,7 +335,10 @@ export default function Home() {
       setTotalSpent(getCostSummary(scenes).totalSpent);
       removeActiveJob(scene.id);
       // Persist to cloud if signed in
-      if (session?.user) recordCostToDb(completed, null);
+      if (session?.user) {
+        recordCostToDb(completed, null);
+        refreshCredits();
+      }
       // Persist video to Supabase Storage (runs in background, non-blocking)
       if (result.videoUrl) {
         persistVideo(result.videoUrl, scene.id).then((permanentUrl) => {
@@ -520,6 +549,16 @@ export default function Home() {
   };
 
   useEffect(() => { fetchProjects(); }, [session?.user?.id]);
+
+  // Handle ?upgraded=true redirect from Stripe Checkout
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("upgraded") === "true") {
+      refreshCredits();
+      // Clean URL
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, [refreshCredits]);
 
   // ── Sidebar: new project (appears immediately in sidebar) ──
   const handleNewProject = () => {
@@ -887,6 +926,7 @@ export default function Home() {
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
+            <CreditsBadge onUpgradeClick={() => { setUpgradeReason("manual"); setShowUpgrade(true); }} />
             <UserMenu />
             <a
               href="https://github.com/rishidandu/cutagent"
@@ -1260,6 +1300,11 @@ export default function Home() {
           onExpandToStoryboard={handleHookLabExpand}
         />
       )}
+      <UpgradeModal
+        open={showUpgrade}
+        onClose={() => setShowUpgrade(false)}
+        reason={upgradeReason}
+      />
     </div>
   );
 }

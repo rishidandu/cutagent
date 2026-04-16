@@ -440,9 +440,27 @@ export default function Home() {
   };
 
   const handleLoadCloudProject = async (id: string) => {
+    if (id === projectId) return; // Already on this project
+
+    // Save current project BEFORE switching
+    if (projectId && scenes.some((s) => s.prompt.trim() || s.videoUrl)) {
+      try {
+        const saveData = { name: deriveProjectName(), scenes, styleContext, audioTracks };
+        if (projectId.startsWith("local-")) {
+          localStorage.setItem(`cutagent-project-${projectId}`, JSON.stringify(saveData));
+        } else if (session?.user) {
+          await fetch(`/api/projects/${projectId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(saveData),
+          });
+        }
+      } catch { /* best effort */ }
+    }
+
+    // Now load the new project
     try {
       if (id.startsWith("local-")) {
-        // Load from localStorage
         const raw = localStorage.getItem(`cutagent-project-${id}`);
         if (!raw) return;
         const data = JSON.parse(raw);
@@ -450,7 +468,6 @@ export default function Home() {
         if (data.styleContext) setStyleContext(data.styleContext);
         if (data.audioTracks) setAudioTracks(data.audioTracks);
       } else {
-        // Load from Supabase
         const resp = await fetch(`/api/projects/${id}`);
         if (!resp.ok) return;
         const data = await resp.json();

@@ -440,17 +440,28 @@ export default function Home() {
 
   const handleLoadCloudProject = async (id: string) => {
     try {
-      const resp = await fetch(`/api/projects/${id}`);
-      if (!resp.ok) return;
-      const data = await resp.json();
-      if (data.scenes) setScenes(scenesFromPartials(data.scenes));
-      if (data.style_context) setStyleContext(data.style_context);
-      if (data.audio_tracks) setAudioTracks(data.audio_tracks);
+      if (id.startsWith("local-")) {
+        // Load from localStorage
+        const raw = localStorage.getItem(`cutagent-project-${id}`);
+        if (!raw) return;
+        const data = JSON.parse(raw);
+        if (data.scenes) setScenes(scenesFromPartials(data.scenes));
+        if (data.styleContext) setStyleContext(data.styleContext);
+        if (data.audioTracks) setAudioTracks(data.audioTracks);
+      } else {
+        // Load from Supabase
+        const resp = await fetch(`/api/projects/${id}`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (data.scenes) setScenes(scenesFromPartials(data.scenes));
+        if (data.style_context) setStyleContext(data.style_context);
+        if (data.audio_tracks) setAudioTracks(data.audio_tracks);
+      }
       setProjectId(id);
       setSelectedScene(0);
       setShowProjectPicker(false);
     } catch {
-      alert("Failed to load project from cloud");
+      alert("Failed to load project");
     }
   };
 
@@ -468,12 +479,26 @@ export default function Home() {
   };
 
   // ── Sidebar: fetch projects on mount ──
+  const LOCAL_PROJECTS_KEY = "cutagent-projects-list";
+
   const fetchProjects = async () => {
-    if (!session?.user) return;
-    try {
-      const resp = await fetch("/api/projects");
-      if (resp.ok) setSavedProjects(await resp.json());
-    } catch { /* ignore */ }
+    if (session?.user) {
+      // Cloud: fetch from Supabase
+      try {
+        const resp = await fetch("/api/projects");
+        if (resp.ok) setSavedProjects(await resp.json());
+      } catch { /* ignore */ }
+    } else {
+      // Local: load project list from localStorage
+      try {
+        const raw = localStorage.getItem(LOCAL_PROJECTS_KEY);
+        if (raw) setSavedProjects(JSON.parse(raw));
+      } catch { /* ignore */ }
+    }
+  };
+
+  const saveLocalProjectList = (projects: typeof savedProjects) => {
+    try { localStorage.setItem(LOCAL_PROJECTS_KEY, JSON.stringify(projects)); } catch { /* ignore */ }
   };
 
   useEffect(() => { fetchProjects(); }, [session?.user?.id]);
@@ -490,41 +515,68 @@ export default function Home() {
   // ── Sidebar: delete project ──
   const handleDeleteProject = async (id: string) => {
     try {
-      await fetch(`/api/projects/${id}`, { method: "DELETE" });
-      setSavedProjects((prev) => prev.filter((p) => p.id !== id));
+      if (id.startsWith("local-")) {
+        localStorage.removeItem(`cutagent-project-${id}`);
+      } else {
+        await fetch(`/api/projects/${id}`, { method: "DELETE" });
+      }
+      setSavedProjects((prev) => {
+        const updated = prev.filter((p) => p.id !== id);
+        if (!session?.user) saveLocalProjectList(updated);
+        return updated;
+      });
       if (projectId === id) handleNewProject();
     } catch { /* ignore */ }
   };
 
-  // ── Auto-save to cloud (debounced 3s) ──
+  // ── Auto-save (debounced 3s) — cloud when signed in, localStorage when not ──
   const cloudSaveTimer = useRef<NodeJS.Timeout>(undefined);
   useEffect(() => {
-    if (!session?.user || !mountedRef.current) return;
+    if (!mountedRef.current) return;
     clearTimeout(cloudSaveTimer.current);
     cloudSaveTimer.current = setTimeout(async () => {
       // Only auto-save if there's actual content
       if (!scenes.some((s) => s.prompt.trim() || s.videoUrl)) return;
-      try {
-        const body = { name: "Untitled", scenes, styleContext, audioTracks };
-        if (projectId) {
-          await fetch(`/api/projects/${projectId}`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-          });
-        } else {
-          const resp = await fetch("/api/projects", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-          });
-          if (resp.ok) {
-            const data = await resp.json();
-            setProjectId(data.id);
-            fetchProjects(); // Refresh sidebar
+
+      if (session?.user) {
+        // Cloud save
+        try {
+          const body = { name: "Untitled", scenes, styleContext, audioTracks };
+          if (projectId) {
+            await fetch(`/api/projects/${projectId}`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(body),
+            });
+          } else {
+            const resp = await fetch("/api/projects", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(body),
+            });
+            if (resp.ok) {
+              const data = await resp.json();
+              setProjectId(data.id);
+              fetchProjects();
+            }
           }
-        }
-      } catch { /* silent */ }
+        } catch { /* silent */ }
+      } else {
+        // Local save — store project in localStorage project list
+        const id = projectId || `local-${Date.now()}`;
+        if (!projectId) setProjectId(id);
+        const projectEntry = { id, name: "Untitled", updated_at: new Date().toISOString() };
+        const projectData = { scenes, styleContext, audioTracks };
+        try {
+          localStorage.setItem(`cutagent-project-${id}`, JSON.stringify(projectData));
+          setSavedProjects((prev) => {
+            const existing = prev.filter((p) => p.id !== id);
+            const updated = [projectEntry, ...existing];
+            saveLocalProjectList(updated);
+            return updated;
+          });
+        } catch { /* quota exceeded */ }
+      }
     }, 3000);
     return () => clearTimeout(cloudSaveTimer.current);
   }, [scenes, styleContext, audioTracks, session?.user?.id]);
@@ -802,14 +854,14 @@ export default function Home() {
 
       {/* Main */}
       <div className="relative z-10 flex flex-1 overflow-hidden">
-        {/* Project sidebar (ChatGPT-style) */}
+        {/* Project sidebar (ChatGPT-style) — always visible */}
         <ProjectSidebar
           projects={savedProjects}
           activeProjectId={projectId}
           onSelectProject={handleLoadCloudProject}
           onNewProject={handleNewProject}
           onDeleteProject={handleDeleteProject}
-          visible={!!session?.user}
+          visible={true}
         />
         <main className="flex-1 overflow-y-auto px-4 py-6 sm:px-6">
           <div className="mx-auto max-w-6xl">

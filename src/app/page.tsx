@@ -504,13 +504,46 @@ export default function Home() {
 
   useEffect(() => { fetchProjects(); }, [session?.user?.id]);
 
-  // ── Sidebar: new project ──
+  // ── Sidebar: new project (appears immediately in sidebar) ──
   const handleNewProject = () => {
-    setScenes([makeScene(0)]);
+    const newId = session?.user ? null : `local-${Date.now()}`;
+    const newScenes = [makeScene(0)];
+
+    setScenes(newScenes);
     setStyleContext(createDefaultStyleContext());
     setAudioTracks([]);
-    setProjectId(null);
     setSelectedScene(0);
+
+    if (newId) {
+      // Local mode: create entry immediately so it shows in sidebar
+      setProjectId(newId);
+      const entry = { id: newId, name: "New project", updated_at: new Date().toISOString() };
+      setSavedProjects((prev) => {
+        const updated = [entry, ...prev];
+        saveLocalProjectList(updated);
+        return updated;
+      });
+      try {
+        localStorage.setItem(`cutagent-project-${newId}`, JSON.stringify({ scenes: newScenes, styleContext: createDefaultStyleContext(), audioTracks: [] }));
+      } catch { /* ignore */ }
+    } else {
+      // Cloud mode: create on server immediately
+      setProjectId(null);
+      (async () => {
+        try {
+          const resp = await fetch("/api/projects", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: "New project", scenes: newScenes, styleContext: createDefaultStyleContext(), audioTracks: [] }),
+          });
+          if (resp.ok) {
+            const data = await resp.json();
+            setProjectId(data.id);
+            fetchProjects();
+          }
+        } catch { /* ignore */ }
+      })();
+    }
   };
 
   // ── Sidebar: delete project ──

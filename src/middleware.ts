@@ -5,7 +5,8 @@ import type { NextRequest } from "next/server";
  * Route protection middleware.
  *
  * When auth is configured (AUTH_GOOGLE_ID present):
- * - /waitlist, /auth/*, /api/auth/*, static files → public
+ * - /auth/*, /api/auth/*, static files → public
+ * - Unauthenticated hitting / → rewrite to /auth/signin (the landing page)
  * - Everything else → requires session, redirects to /auth/signin
  *
  * When auth is NOT configured (self-hosted mode):
@@ -21,7 +22,6 @@ export async function middleware(req: NextRequest) {
 
   // Public routes — no auth required
   if (
-    pathname.startsWith("/waitlist") ||
     pathname.startsWith("/auth") ||
     pathname.startsWith("/api/") ||    // API routes use requireAuth() internally
     pathname.startsWith("/_next") ||
@@ -37,9 +37,9 @@ export async function middleware(req: NextRequest) {
     req.cookies.get("authjs.session-token")?.value;
 
   if (!sessionToken) {
-    // Homepage: show landing page instead of sign-in redirect
+    // Homepage: show landing page (which lives at /auth/signin)
     if (pathname === "/") {
-      return NextResponse.rewrite(new URL("/waitlist", req.url));
+      return NextResponse.rewrite(new URL("/auth/signin", req.url));
     }
     // All other protected routes: redirect to sign-in
     const signInUrl = new URL("/auth/signin", req.url);

@@ -42,3 +42,5 @@ business/
 
 # build artifacts
 tsconfig.tsbuildinfo
+.aidesigner/*
+!.aidesigner/.gitkeep

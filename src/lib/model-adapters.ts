@@ -60,6 +60,23 @@ function pickBestReference(refs: ReferenceImage[]): ReferenceImage | undefined {
   return refs[0];
 }
 
+/**
+ * Pick the nearest supported numeric option.
+ */
+function pickNearest(value: number, allowed: readonly number[]): number {
+  if (allowed.length === 0) return value;
+  let best = allowed[0];
+  let bestDist = Math.abs(value - best);
+  for (const v of allowed) {
+    const dist = Math.abs(value - v);
+    if (dist < bestDist) {
+      best = v;
+      bestDist = dist;
+    }
+  }
+  return best;
+}
+
 // ── Model Adapters ──
 
 function buildKlingRequest({ scene, model, brief, references, strength }: AdapterInput): AdapterOutput {
@@ -67,11 +84,12 @@ function buildKlingRequest({ scene, model, brief, references, strength }: Adapte
   const endpointId = hasRefs ? model.consistency!.endpointId : model.id;
 
   const prompt = augmentPrompt(scene.prompt, brief);
+  const duration = pickNearest(scene.duration, [5, 10]);
   const input: Record<string, unknown> = {
     prompt,
     negative_prompt: NEGATIVE_PROMPT,
     aspect_ratio: scene.aspectRatio,
-    duration: `${scene.duration}`,
+    duration: `${duration}`,
     // Higher cfg_scale = stricter prompt adherence (better for product fidelity)
     cfg_scale: 0.7,
   };
@@ -111,7 +129,8 @@ function buildMiniMaxRequest({ scene, model, brief, references }: AdapterInput):
     const ref = pickBestReference(references);
     if (ref) {
       if (hasCharacterRef) {
-        input.subject_reference = ref.url;
+        // API expects subject_reference_image_url (not subject_reference)
+        input.subject_reference_image_url = ref.url;
       } else {
         input.image_url = ref.url;
       }
@@ -126,12 +145,18 @@ function buildWanRequest({ scene, model, brief, references }: AdapterInput): Ada
   const endpointId = hasRefs ? model.consistency!.endpointId : model.id;
 
   const prompt = augmentPrompt(scene.prompt, brief);
+  const duration = pickNearest(scene.duration, [5, 10]);
   const input: Record<string, unknown> = {
     prompt,
     negative_prompt: NEGATIVE_PROMPT,
-    aspect_ratio: scene.aspectRatio,
-    num_frames: Math.round(scene.duration * 16),
+    duration: `${duration}`,
   };
+
+  // WAN 2.5 image-to-video infers framing from the input image and does not
+  // expose aspect_ratio in its public schema.
+  if (!hasRefs) {
+    input.aspect_ratio = scene.aspectRatio;
+  }
 
   if (hasRefs) {
     const ref = pickBestReference(references);
@@ -171,10 +196,17 @@ function buildHunyuanRequest({ scene, model, brief, references }: AdapterInput):
   const endpointId = hasRefs ? model.consistency!.endpointId : model.id;
 
   const prompt = augmentPrompt(scene.prompt, brief);
+
+  // Current public schema exposes "85" or "129" as string-literal enum values
+  // for num_frames. Sending integers fails fal's Pydantic validator.
+  // Map shorter scenes to "85" and longer scenes to "129".
+  const numFrames = scene.duration <= 4 ? "85" : "129";
+
   const input: Record<string, unknown> = {
     prompt,
+    num_frames: numFrames,
+    resolution: "720p",
     aspect_ratio: scene.aspectRatio,
-    duration: `${scene.duration}s`,
   };
 
   if (hasRefs) {
@@ -207,24 +239,33 @@ function buildLumaRequest({ scene, model, brief, references }: AdapterInput): Ad
 function buildVeoRequest({ scene, model, brief, references }: AdapterInput): AdapterOutput {
   const hasRefs = references.length > 0 && model.consistency;
   const endpointId = hasRefs ? model.consistency!.endpointId : model.id;
+  const isVeo3 = model.id.includes("veo3");
 
   // Veo benefits most from prompt-level consistency since its image conditioning
   // is prompt-driven. The augmented prompt is the primary consistency lever.
   const prompt = augmentPrompt(scene.prompt, brief);
-  // Veo accepts '5s','6s','7s','8s' only — clamp and add 's' suffix
-  const veoDur = Math.max(5, Math.min(8, Math.round(scene.duration)));
-  // Use 1080p for CTA/solution (hero shots benefit from higher res), 720p for others
-  const resolution = scene.role === "cta" || scene.role === "solution" ? "1080p" : "720p";
+  // Veo2 supports 5s/6s/7s/8s. Veo3 supports 4s/6s/8s.
+  const veoDur = isVeo3
+    ? pickNearest(scene.duration, [4, 6, 8])
+    : pickNearest(scene.duration, [5, 6, 7, 8]);
+
   const input: Record<string, unknown> = {
     prompt,
-    aspect_ratio: scene.aspectRatio,
     duration: `${veoDur}s`,
-    resolution,
   };
 
-  // Enable native audio for Veo 3, but disable if scene has voiceover text
-  // (the TTS voiceover will be mixed in during export instead)
-  if (model.id.includes("veo3")) {
+  // Veo2 image-to-video schema does not expose aspect_ratio; Veo2 text-to-video
+  // and Veo3 endpoints do.
+  if (!hasRefs || isVeo3) {
+    input.aspect_ratio = scene.aspectRatio;
+  }
+
+  // Resolution is exposed on Veo3 endpoints.
+  if (isVeo3) {
+    // Use 1080p for CTA/solution (hero shots benefit from higher res), 720p for others.
+    input.resolution = scene.role === "cta" || scene.role === "solution" ? "1080p" : "720p";
+    // Enable native audio for Veo 3, but disable if scene has voiceover text
+    // (the TTS voiceover will be mixed in during export instead).
     input.generate_audio = !scene.voiceoverText?.trim();
   }
 

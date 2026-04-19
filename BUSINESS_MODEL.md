@@ -1,170 +1,156 @@
-# CutAgent — Business Model & Wedge Strategy
+# CutAgent — Business Model
 
-## Product
+**Last updated: 2026-04-17**
 
-Open-source multi-model AI video editor powered by fal.ai. Storyboard-first workflow for e-commerce sellers and performance marketers who need high-volume ad creatives with consistent style across scenes.
+## One-line
 
----
+CutAgent is ad-creative production infrastructure for DTC agencies. One subscription, unlimited client brands, full white-label. Replaces per-client UGC creator spend with a single per-agency platform fee.
 
-## Competitive Landscape
+## The shift from the original plan
 
-### Direct competitors (storyboard-to-video)
+The repo was originally positioned as an open-source multi-model video editor for individual e-commerce sellers. That positioning still lives in old docs. **It is no longer the primary business.** The updated plan (see `business/UPDATED_TIMELINE.md` and `business/GROWTH_PLAN_AGENCY_SPRINT.md`) is agency-first:
 
-| Tool | Multi-model? | Price | Open source? | Gap |
-|---|---|---|---|---|
-| LTX Studio | Yes (LTX-2, Veo, Kling) | $15-125/mo | No (LTX-2 model is OSS) | Closed, pushes own model first |
-| Higgsfield | Yes (Kling 3, Sora 2, Veo 3.1, Wan) | $15-84/mo | No | No style harness between models |
-| Katalist | Undisclosed | Paid | No | Agency-focused, not creator-accessible |
+- Same product. Different buyer.
+- 1 agency at $499/mo ≈ 17 solo sellers at $29/mo. Higher ARPU, lower CAC, slower churn.
+- Outbound-closable in 1 call. Solo sellers are an inbound / content funnel — a 7+ month grind.
+- Open-source stays alive as the community/trust moat and the inbound floor. It is not the growth engine.
 
-### Adjacent tools (single-clip or avatar-locked)
+## The buyer
 
-| Category | Tools | Why they're not the same |
+**Primary persona:** Creative Director or Head of Creative at a DTC growth agency managing 10–30 Shopify clients, currently spending $15–50K/month on UGC coordinators and creators, consistently under-supplied on ad variants.
+
+**Secondary persona:** Founder/CEO of a boutique performance marketing agency doing $1–5M/yr in revenue, looking to increase margin by replacing variable UGC spend with fixed tooling spend.
+
+**Not the buyer (right now):** Solo dropshippers, individual creators, enterprise L&D teams, internal comms departments. These might be accessible later via self-serve and API tiers but are not the focus of the current sales motion.
+
+## The pitch
+
+"You're spending $1,500–5,000 per month per client on UGC creators to ship ad variants your media buyer needs to iterate. At 10 clients that's $15–50K a month before management fee margin.
+
+CutAgent is $499/month total. White-label exports with your agency's logo. Unlimited client brand kits. 500 videos a month across your whole roster. Paste a product URL, get a stack of ad variants with Hook Lab and Style Engine keeping them cohesive.
+
+Your clients never see our brand. Your media buyer gets the volume they need. You keep the creative production margin that used to go to UGC."
+
+## Pricing
+
+Current code (`src/lib/stripe.ts`) ships consumer tiers — those exist for the self-serve inbound floor and the open-source community. The **agency tiers are the business**:
+
+| Tier | Price | Target | What agencies get |
+|---|---|---|---|
+| **Agency Starter** | $199/mo | Boutique agencies, 3–10 clients | 10 client brand kits, 100 videos/month, CutAgent branding on exports |
+| **Agency Pro** | $499/mo | Growth agencies, 10–30 clients | Unlimited brand kits, 500 videos/month, white-label export |
+| **Agency Enterprise** | $1,200–2,000/mo | 25+ clients or in-house creative | Unlimited everything, custom domain, dedicated onboarding, SLA, API access |
+| **Design Partner** | $3–10K/mo | 2–3 hand-picked partners | Weekly co-dev calls, roadmap input, locked 12-month pricing, named as founding partner |
+
+Consumer tiers (kept as inbound floor, not the focus):
+
+| Tier | Price | Target |
 |---|---|---|
-| Single-clip generators | Runway, Pika, Luma, Haiper | No multi-scene, no storyboard |
-| Avatar-based | Synthesia ($146M ARR), HeyGen ($95M ARR), Colossyan | Talking heads only, not generative video |
-| Ad-template | Creatify, Topview, Arcads | Template-driven, limited model choice |
-| Open-source pipeline | ComfyUI | Node-based, developer-only, no editor UI |
+| Free | $0 | OSS community, trial, funnel capture |
+| Premium | $20/mo | Individual creators, small Shopify operators |
+| Pro | $50/mo | Power creators, small brands in-house |
+
+## Target mix at $1M ARR (stretch case)
+
+Per `business/GROWTH_PLAN_AGENCY_SPRINT.md`, achievable in 4–5 months if agency close rate holds at 25–30%:
+
+| Segment | Customers | ARPU | MRR |
+|---|---|---|---|
+| Agency Starter | 50 | $199 | $9,950 |
+| Agency Pro | 45 | $499 | $22,455 |
+| Agency Enterprise | 12 | $1,500 | $18,000 |
+| Design Partners | 3 | $6,000 | $18,000 |
+| Pro self-serve | 200 | $29 | $5,800 |
+| **Total** | **310** | — | **$74,205** |
+
+Close 3 more Agency Pro to hit $83,333 MRR = $1M ARR.
+
+**Realistic base case** (per `business/REALISTIC_REVENUE_TIMELINE.md`): first revenue late May 2026, $10K MRR by August, $22–35K MRR by October. Treat $1M-in-5-months as the ceiling, not the default.
+
+## The moat
+
+CutAgent has three defensibility layers. None of them are permanent — they are compounding leads, not permanent walls:
+
+**1. The Style Engine (technical)**
+Frame chaining between scenes, shared style briefs, reference images per prompt. No other tool in the storyboard-to-video space does this. The moat is the **integration** of these techniques into one workflow, not any single technique.
+
+**2. Agency workflow (product)**
+Per-client brand kits, white-label export, multi-client workspace, Hook Lab volume primitives. Built-for-agency features that consumer tools (LTX Studio, Higgsfield) and ad-template tools (Creatify, Arcads) don't prioritize. The first serious competitor to replicate these is 3–6 months out minimum.
+
+**3. Open source + community (distribution)**
+MIT-licensed editor on GitHub. Drives trust, contributions, organic discovery. Hard for a funded closed competitor to replicate without forking. Compounds over time if maintained.
+
+None of these are permanent. Models improve weekly; the Style Engine needs continuous adaptation. Agency workflow can be copied in 3–6 months. Community needs ongoing founder investment. The real moat is **speed of iteration with feedback from real agencies** — the design partner program is the structural commitment to keep that loop tight.
+
+## Competitive landscape (updated April 2026)
+
+### Direct competitors (multi-model storyboard)
+
+| Tool | Multi-model | Price | Open source | Agency focus |
+|---|---|---|---|---|
+| LTX Studio | Yes (LTX-2, Veo, Kling) | $15–125/mo | No | No — pushes own model first |
+| Higgsfield | Yes (Kling, Sora 2, Veo, Wan) | $15–84/mo | No | No — creator-first |
+| Katalist | Undisclosed | Paid | No | Yes — but closed, expensive, agency-lock |
+
+### Adjacent tools
+
+| Category | Tools | Why they don't overlap |
+|---|---|---|
+| Single-clip | Runway, Pika, Luma, Haiper | No multi-scene, no storyboard |
+| Avatar-based | Synthesia, HeyGen, Colossyan | Talking heads only |
+| Ad template | Creatify, Topview, Arcads | Template-driven, limited model choice, no white-label per client |
+| OSS pipeline | ComfyUI | Developer-only, no editor UI |
 
 ### What nobody has built
 
-An open-source, multi-model storyboard editor with style consistency and an e-commerce-first workflow. That's us.
+An open-source, multi-model storyboard editor with:
+- Per-client brand kits and white-label export
+- Batch variation primitives (Hook Lab) built for media-buyer workflows
+- Style Engine for visual cohesion across different AI models
+- Agency-tier pricing ($199–$1,200/mo per agency, not per seat)
 
----
+That's the defensible position. That's CutAgent.
 
-## Target Audience
+## Revenue layers (long-term)
 
-### Wedge: E-commerce sellers and dropshippers
+### Layer 1: Agency SaaS (current focus)
+Subscription revenue at $199–$2,000/mo per agency. Target $750K–$1M ARR by end of Year 1.
 
-| Signal | Data |
-|---|---|
-| Pain | UGC costs $150-500/video, need 5-10 variants per product for TikTok/Meta |
-| Current spend | $30-50/mo on Creatify/Zeely, $500-3K/mo total creative budget |
-| Volume need | 50-100 ad creatives/month |
-| Willingness to pay | $29/mo tool replacing one $300 UGC creator is instant ROI |
-| Acquisition | Shopify app store, TikTok communities, dropshipping Reddit/Discord |
+### Layer 2: Self-serve consumer floor
+$29 Premium and $50 Pro as inbound capture for people who find the open-source repo, the Shopify App Store listing, or the gallery. Not a growth engine; a floor. Target $5–10K MRR.
 
-### Expansion path
+### Layer 3: Agency API (Year 2)
+REST API for programmatic batch generation. Per-video pricing or % of ad spend. White-label for agencies to build their own tooling on top. Target $10–30K MRR from 20–50 enterprise contracts.
 
-```
-E-commerce sellers (wedge)
-  → Agencies managing e-commerce accounts ($5-50K/mo creative budgets)
-  → All performance marketing agencies (50-100+ variants/month/client)
-  → Enterprise L&D / internal comms ($500-10K/mo, longer contracts)
-```
+### Layer 4: Template marketplace (Year 2+)
+Community-created storyboard templates with 70/30 creator/platform split. Compounds Open Source credibility and creator LTV. Not the growth lever; an add-on.
 
-### Killer workflow
+## Why this plan works
 
-```
-1. Paste Shopify product URL
-2. AI extracts: product images, title, description, price
-3. Auto-generates 4-scene storyboard:
-   - Hook (3s)    → Kling (motion, action)
-   - Problem (3s) → Veo (realism, emotion)
-   - Solution (3s)→ product showcase via MiniMax (fast/cheap)
-   - CTA (3s)     → Veo (native audio)
-4. Style Harness chains scenes for visual consistency
-5. Generate 10 variations (different hooks, models, styles)
-6. Export all → upload to TikTok/Meta ad manager
-```
+**1. The product is past the hard part.** 8 models wired, Style Engine shipped, Hook Lab shipped, avatars + captions shipped, auth + Stripe + cloud storage shipped. The usual 6–12 month build sprint is done. What remains is 3–4 targeted Tier 0 fixes (see `BUILD_PRIORITIES.md`) before outbound starts.
 
----
+**2. The math is better than consumer SaaS.** 310 customers to $1M ARR vs. 2,400 customers to the same revenue. 4–5 month aggressive timeline vs. 7–12 month consumer slog. Founder-led outbound is feasible at 310 customers; not feasible at 2,400.
 
-## The Style Harness (Technical Moat)
+**3. The wedge is sharp and specific.** "DTC agency running 10+ Shopify clients, paying $15K+/mo on UGC." The persona is nameable, findable on LinkedIn, and has a measurable pain with a measurable spend. That's the definition of a sellable wedge.
 
-The intelligence layer between user and models:
+**4. The competitive window is open.** Multi-model + storyboard + agency-white-label is a gap in the market. LTX and Higgsfield are building upmarket consumer; template tools are cheap; avatar tools are niche. Nobody is owning the agency creative-production middle. 6–12 month window before someone else figures it out.
 
-1. **Character Consistency Engine** — extract reference frames from completed scenes, auto-feed as img2vid input to next scene
-2. **Prompt Normalization** — translate creative intent into model-specific prompts (each model interprets "cinematic warm lighting" differently)
-3. **Color/Style Matching** — post-process outputs so clips from different models feel like one video
-4. **Scene Planner** — user writes script, AI picks best model per shot and splits into scenes
+## What could kill this
 
----
+**1. The 3 P0 fixes don't ship.** Managed fal.ai key, agency pricing, brand kit watermark. Without these, every demo ends in an objection. See `business/DEMO_READINESS_AUDIT.md`.
 
-## Market Opportunity
+**2. Founder continues to build instead of sell.** The strongest anti-pattern at this stage. The rule in `BUILD_PRIORITIES.md` — no new features unless 3 paying prospects ask — is the structural countermove.
 
-| Segment | Size | Our angle |
-|---|---|---|
-| AI video generator market | $946M (2026) → $3.4B (2033) | Multi-model orchestration layer |
-| UGC platform market | $8.5B (2026) → $64B (2034) | Open-source alternative to Creatify/Arcads |
-| Video ad production | $5-15K/min traditional → $100-500/min AI | 10x cost reduction |
+**3. Agency sales cycles are longer than expected.** Realistic worst case: 4-week sales cycle, 20% close rate, $25K MRR by month 5 instead of $75K. Mitigation: cold email volume + referral flywheel from the first 3–5 closes.
 
----
+**4. A well-funded competitor ships white-label agency features first.** Low probability in the 6-month window, but non-zero. Mitigation: sign 2–3 design partners fast. Locked 12-month pricing and co-development intimacy makes agency churn to a competitor structurally harder.
 
-## Business Model (Layered)
+**5. fal.ai pricing shifts or a model provider pulls access.** The model dependency is real. Mitigation: no single-model lock-in (8 models live, more coming); switching cost is low because the product is model-agnostic. If fal.ai disappears, the 6-month rebuild is to a different model aggregator — annoying but survivable.
 
-### Layer 1: Open Source Editor (Free)
-- Full storyboard + generation + timeline + export
-- Users bring own fal.ai key
-- Drives adoption, community contributions, GitHub stars
-- **Goal:** become the default open-source AI video editor
+## One decision to revisit quarterly
 
-### Layer 2: Hosted Platform (Freemium SaaS)
-- Hosted version — no setup, no API keys needed
-- Free: 5 videos/month, watermark, 720p
-- Pro ($29/mo): unlimited, 1080p, no watermark, priority queue
-- Team ($79/mo): collaboration, shared brand kits, batch generation
-- **Margin:** fal.ai cost ~$0.20-1.00/video, charge $3-5/video = 70-80% gross margin
+Primary GTM motion: **agency outbound, founder-led, $199–$499 ARPU** for the first 10–30 customers. Self-serve stays as the floor, not the engine.
 
-### Layer 3: Template Marketplace (Commission)
-- Community-created storyboard templates
-  - "Product showcase": intro → close-up → lifestyle → CTA
-  - "UGC ad": hook → problem → solution → social proof
-  - "Explainer": concept → demo → benefits → pricing
-- 70/30 split (creator/platform)
-- Templates are model-agnostic
+The trigger to shift: if the Shopify App Store listing drives 50+ organic installs/week and Pro conversion is 5%+, the consumer self-serve motion may become viable at scale. Until then, founder-led agency sales is the one thing that can compound fast enough.
 
-### Layer 4: Agency API (Enterprise)
-- REST API for programmatic batch generation
-- "Generate 100 variations of this ad concept"
-- Per-video pricing or % of ad spend
-- White-label for agencies to resell
-
----
-
-## Revenue Path
-
-```
-Month 1-3:  Open source launch, fal.ai integration, community building
-Month 4-6:  Hosted platform, free + pro tiers, Shopify app store
-Month 7-9:  Template marketplace, product URL import, brand kit
-Month 10+:  Agency API, enterprise contracts, batch generation
-
-Year 1: 10K free users, 500 pro subscribers = ~$175K ARR
-Year 2: 50K users, 2K pro + 50 teams = ~$1M ARR
-Year 3: marketplace + agency API = $5M+ ARR
-```
-
----
-
-## Why Open Source Wins
-
-1. **Trust** — creators see exactly what happens with their content and API keys
-2. **Distribution** — GitHub stars → HN → organic (OpenCut got 27K+ stars in months)
-3. **Extensibility** — community builds Shopify plugin, Premiere bridge, etc.
-4. **Moat** — Style Harness algorithm becomes the standard
-5. **Hiring** — contributors become team members
-
----
-
-## Tech Stack
-
-```
-Frontend only (no backend for generation):
-├── Next.js + React + Tailwind
-├── @fal-ai/client          ← calls fal.ai directly from browser
-├── Zustand                  ← state (scenes, timeline, API keys)
-└── FFmpeg.wasm              ← client-side video stitching + export
-```
-
----
-
-## Build Sprints
-
-| Sprint | What | Why |
-|---|---|---|
-| 1 | fal.ai integration + model dropdown + working generation | Prove it works |
-| 2 | Multi-scene storyboard + parallel generation | Core product shape |
-| 3 | Style Harness v1 (img2vid chaining between scenes) | The differentiator |
-| 4 | Timeline + trim + transitions + FFmpeg export | Shippable product |
-| 5 | Product URL import (paste Shopify link → auto storyboard) | E-commerce wedge |
-| 6 | Template system + 5 built-in templates | Reduce blank-canvas friction |
+Revisit in July 2026 with actual funnel data.

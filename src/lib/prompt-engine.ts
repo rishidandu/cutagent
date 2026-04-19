@@ -12,6 +12,14 @@
 
 import type { SceneRole } from "@/types";
 
+// ── Site type (mirrors scrape route) ──
+
+export type SiteType = "ecommerce" | "saas" | "app" | "service" | "generic";
+
+export function siteTypeToFamily(siteType: SiteType | undefined): "physical" | "digital" {
+  return siteType === "ecommerce" ? "physical" : "digital";
+}
+
 // ── Product context passed from scrape ──
 
 export interface ProductContext {
@@ -23,6 +31,14 @@ export interface ProductContext {
   brand: string;
   /** The visual appearance of the product for prompt grounding */
   visualDescription: string;
+  /** What kind of site this is — drives template family selection */
+  siteType?: SiteType;
+  /** Short noun describing the product: "web app", "mobile app", "project management tool" */
+  productKind?: string;
+  /** Feature bullets — used for voiceover one-liners */
+  features?: string[];
+  /** Primary CTA button text from the landing page */
+  ctaText?: string;
 }
 
 // ── Style prefix system ──
@@ -171,84 +187,163 @@ interface RoleTemplate {
   continuityCues: string;
 }
 
-const ROLE_TEMPLATES: Record<SceneRole, RoleTemplate[]> = {
-  hook: [
-    {
-      subjectAction: (p) => `Extreme close-up of a person's hands lifting ${p.shortName} out of a delivery box, fingers gripping the product clearly`,
-      environment: (p) => `clean desk or countertop surface, package tissue paper visible, ${p.visualDescription}`,
-      continuityCues: "preserve exact product shape, maintain consistent proportions throughout",
-    },
-    {
-      subjectAction: (p) => `POV shot: a hand reaches toward ${p.shortName} sitting on a table, quick grab motion, then holds it up to camera`,
-      environment: (p) => `bright modern kitchen or bathroom counter, morning light, ${p.visualDescription}`,
-      continuityCues: "preserve original product appearance exactly, no morphing or warping",
-    },
-    {
-      subjectAction: (p) => `Person scrolling phone stops abruptly, looks up with wide eyes, camera whip-pans to reveal ${p.shortName} on the surface next to them`,
-      environment: (p) => `cozy home setting, couch or bed, casual outfit, ${p.visualDescription}`,
-      continuityCues: "product appears sharp and in-focus, unaltered from original appearance",
-    },
-  ],
+type TemplateFamily = "physical" | "digital";
 
-  problem: [
-    {
-      subjectAction: (p) => `Person looking frustrated at their current inferior product or situation, sighing, then glancing at ${p.shortName} nearby`,
-      environment: (p) => `everyday setting showing the pain point clearly, slightly messy or imperfect surroundings`,
-      continuityCues: "facial expression reads clearly as mild frustration, natural not exaggerated",
-    },
-    {
-      subjectAction: (p) => `Quick montage: person struggling with an old way of doing things, three rapid cuts showing the inconvenience`,
-      environment: () => `realistic everyday environments, bathroom mirror, kitchen counter, desk`,
-      continuityCues: "same person across all cuts, consistent clothing and lighting direction",
-    },
-  ],
+const ROLE_TEMPLATES: Record<TemplateFamily, Record<SceneRole, RoleTemplate[]>> = {
+  // Physical products — existing templates (ecommerce)
+  physical: {
+    hook: [
+      {
+        subjectAction: (p) => `Extreme close-up of a person's hands lifting ${p.shortName} out of a delivery box, fingers gripping the product clearly`,
+        environment: (p) => `clean desk or countertop surface, package tissue paper visible, ${p.visualDescription}`,
+        continuityCues: "preserve exact product shape, maintain consistent proportions throughout",
+      },
+      {
+        subjectAction: (p) => `POV shot: a hand reaches toward ${p.shortName} sitting on a table, quick grab motion, then holds it up to camera`,
+        environment: (p) => `bright modern kitchen or bathroom counter, morning light, ${p.visualDescription}`,
+        continuityCues: "preserve original product appearance exactly, no morphing or warping",
+      },
+      {
+        subjectAction: (p) => `Person scrolling phone stops abruptly, looks up with wide eyes, camera whip-pans to reveal ${p.shortName} on the surface next to them`,
+        environment: (p) => `cozy home setting, couch or bed, casual outfit, ${p.visualDescription}`,
+        continuityCues: "product appears sharp and in-focus, unaltered from original appearance",
+      },
+    ],
+    problem: [
+      {
+        subjectAction: (p) => `Person looking frustrated at their current inferior product or situation, sighing, then glancing at ${p.shortName} nearby`,
+        environment: () => `everyday setting showing the pain point clearly, slightly messy or imperfect surroundings`,
+        continuityCues: "facial expression reads clearly as mild frustration, natural not exaggerated",
+      },
+      {
+        subjectAction: () => `Quick montage: person struggling with an old way of doing things, three rapid cuts showing the inconvenience`,
+        environment: () => `realistic everyday environments, bathroom mirror, kitchen counter, desk`,
+        continuityCues: "same person across all cuts, consistent clothing and lighting direction",
+      },
+    ],
+    solution: [
+      {
+        subjectAction: (p) => `Person confidently picks up ${p.shortName} and demonstrates using it, close-up on their hands interacting with the product`,
+        environment: (p) => `well-lit lifestyle setting, ${p.visualDescription}, product fills 40-60% of frame during close-up`,
+        continuityCues: "preserve exact product appearance from reference, smooth natural hand movements",
+      },
+      {
+        subjectAction: (p) => `Satisfying close-up of ${p.shortName} being opened or activated, then pull back to show person using it with a subtle smile`,
+        environment: (p) => `clean surface, ${p.visualDescription}, camera starts tight macro then widens`,
+        continuityCues: "product proportions stay consistent between shots, surfaces unaltered",
+      },
+    ],
+    proof: [
+      {
+        subjectAction: (p) => `Person looking directly at camera, holding ${p.shortName}, nodding with genuine satisfaction, then showing the result`,
+        environment: (p) => `natural home or office setting, ${p.visualDescription}, eye-level camera angle`,
+        continuityCues: "authentic expression, not over-acted, product visible and unaltered from reference",
+      },
+      {
+        subjectAction: (p) => `Before and after comparison: left side shows the old way, right side shows the result with ${p.shortName}`,
+        environment: () => `split composition or sequential comparison, same lighting on both sides`,
+        continuityCues: "consistent lighting direction so comparison reads as genuine",
+      },
+    ],
+    cta: [
+      {
+        subjectAction: (p) => `${p.shortName} centered in frame on a clean surface, camera slowly pushing in, product is hero`,
+        environment: (p) => `minimalist surface, ${p.visualDescription}, space left for text overlay on top third of frame`,
+        continuityCues: "product sharp and well-lit, leave negative space for post-production overlay",
+      },
+      {
+        subjectAction: (p) => `Person holds up ${p.shortName} to camera with a confident smile, product at eye level, natural endorsement pose`,
+        environment: (p) => `bright, clean background, ${p.visualDescription}, face and product both in focus`,
+        continuityCues: "product and face both sharp, product surface unaltered from reference",
+      },
+    ],
+    custom: [
+      {
+        subjectAction: (p) => `${p.shortName} shown in use in an authentic setting`,
+        environment: (p) => `lifestyle environment appropriate for the product, ${p.visualDescription}`,
+        continuityCues: "maintain product appearance consistency",
+      },
+    ],
+  },
 
-  solution: [
-    {
-      subjectAction: (p) => `Person confidently picks up ${p.shortName} and demonstrates using it, close-up on their hands interacting with the product`,
-      environment: (p) => `well-lit lifestyle setting, ${p.visualDescription}, product fills 40-60% of frame during close-up`,
-      continuityCues: "preserve exact product appearance from reference, smooth natural hand movements",
-    },
-    {
-      subjectAction: (p) => `Satisfying close-up of ${p.shortName} being opened or activated, then pull back to show person using it with a subtle smile`,
-      environment: (p) => `clean surface, ${p.visualDescription}, camera starts tight macro then widens`,
-      continuityCues: "product proportions stay consistent between shots, surfaces unaltered",
-    },
-  ],
-
-  proof: [
-    {
-      subjectAction: (p) => `Person looking directly at camera, holding ${p.shortName}, nodding with genuine satisfaction, then showing the result`,
-      environment: (p) => `natural home or office setting, ${p.visualDescription}, eye-level camera angle`,
-      continuityCues: "authentic expression, not over-acted, product visible and unaltered from reference",
-    },
-    {
-      subjectAction: (p) => `Before and after comparison: left side shows the old way, right side shows the result with ${p.shortName}`,
-      environment: () => `split composition or sequential comparison, same lighting on both sides`,
-      continuityCues: "consistent lighting direction so comparison reads as genuine",
-    },
-  ],
-
-  cta: [
-    {
-      subjectAction: (p) => `${p.shortName} centered in frame on a clean surface, camera slowly pushing in, product is hero`,
-      environment: (p) => `minimalist surface, ${p.visualDescription}, space left for text overlay on top third of frame`,
-      continuityCues: "product sharp and well-lit, leave negative space for post-production overlay",
-    },
-    {
-      subjectAction: (p) => `Person holds up ${p.shortName} to camera with a confident smile, product at eye level, natural endorsement pose`,
-      environment: (p) => `bright, clean background, ${p.visualDescription}, face and product both in focus`,
-      continuityCues: "product and face both sharp, product surface unaltered from reference",
-    },
-  ],
-
-  custom: [
-    {
-      subjectAction: (p) => `${p.shortName} shown in use in an authentic setting`,
-      environment: (p) => `lifestyle environment appropriate for the product, ${p.visualDescription}`,
-      continuityCues: "maintain product appearance consistency",
-    },
-  ],
+  // Digital products — SaaS, mobile apps, services, generic landing pages
+  digital: {
+    hook: [
+      {
+        subjectAction: (p) => `POV over-the-shoulder close-up of hands typing on a MacBook, the ${p.shortName} dashboard filling the screen, cursor moving purposefully`,
+        environment: (p) => `modern coffee-shop or home-office desk, warm ambient light, coffee cup beside laptop, ${p.visualDescription}`,
+        continuityCues: "screen content matches the reference UI exactly, no fake interface elements, laptop bezel visible",
+      },
+      {
+        subjectAction: (p) => `Tight close-up of a phone screen in a person's hands, thumb swipes through the ${p.shortName} app interface, reaction of surprise on the partially-visible face above`,
+        environment: (p) => `couch or kitchen counter background soft-focus, daylight from a window, ${p.visualDescription}`,
+        continuityCues: "phone UI matches reference screenshot exactly, no hallucinated menu items or fake text",
+      },
+      {
+        subjectAction: (p) => `Person looks directly at camera with a raised eyebrow, says something to the viewer, whip-pan down to their laptop screen already open on ${p.shortName}`,
+        environment: (p) => `home workspace, plants and bookshelf softly blurred behind, ${p.visualDescription}`,
+        continuityCues: "face stays consistent across the whip-pan, screen content unaltered from reference",
+      },
+    ],
+    problem: [
+      {
+        subjectAction: () => `Person at their desk looking overwhelmed by a cluttered screen — too many tabs, spreadsheets, sticky notes — head in hands, sighing`,
+        environment: () => `messy desk, crumpled paper, coffee rings, afternoon lighting, realistic workplace fatigue`,
+        continuityCues: "expression reads as mild frustration not defeat, tabs and windows recognizable as generic work clutter",
+      },
+      {
+        subjectAction: () => `Quick montage: person copying data between three different apps, typing the same info twice, checking a watch in frustration`,
+        environment: () => `home office, same person across cuts, repetitive manual-work feel`,
+        continuityCues: "same person, same outfit, same room across all cuts",
+      },
+    ],
+    solution: [
+      {
+        subjectAction: (p) => `Screen recording-style close-up of the ${p.shortName} interface, cursor clicks through a key workflow, smooth transitions between views, subtle zoom on the result`,
+        environment: (p) => `pristine screen capture framing, ${p.visualDescription}, the UI is the hero of the shot`,
+        continuityCues: "UI elements match reference exactly, no invented buttons or text, cursor movement is deliberate and readable",
+      },
+      {
+        subjectAction: (p) => `Split composition: person's face on the left nodding with satisfaction, ${p.shortName} dashboard on the right showing a task completing or a graph trending up`,
+        environment: (p) => `clean home-office setup, ${p.visualDescription}, both halves well-lit`,
+        continuityCues: "screen content stays true to reference, face expression natural and believable",
+      },
+    ],
+    proof: [
+      {
+        subjectAction: (p) => `Person talking directly to camera in a FaceTime-style selfie angle, laptop visible in the lower frame showing ${p.shortName}, gestures at the screen while explaining`,
+        environment: (p) => `bedroom or cozy workspace, soft window light, ${p.visualDescription}`,
+        continuityCues: "authentic testimonial feel, screen content legible and matches reference",
+      },
+      {
+        subjectAction: (p) => `Before/after split: left side shows frustrating manual work, right side shows the same task done in ${p.shortName} in seconds, timer comparison on top`,
+        environment: () => `consistent lighting across both halves, same workspace`,
+        continuityCues: "left and right halves cut together cleanly, no flickering UI",
+      },
+    ],
+    cta: [
+      {
+        subjectAction: (p) => {
+          const cta = p.ctaText || "Get started";
+          return `Hero end-card: ${p.shortName} logo and dashboard screenshot centered on screen, slow push-in, space above for overlay text "${cta}"`;
+        },
+        environment: (p) => `clean gradient or blurred desk background, ${p.visualDescription}, minimalist composition`,
+        continuityCues: "logo and UI proportions exactly match reference, negative space preserved for post-production text",
+      },
+      {
+        subjectAction: (p) => `Person holds up their laptop screen to the camera, ${p.shortName} open on it, confident smile, end-card composition`,
+        environment: (p) => `bright neutral background, ${p.visualDescription}, face and screen both in sharp focus`,
+        continuityCues: "screen content unaltered from reference, no glare obscuring UI",
+      },
+    ],
+    custom: [
+      {
+        subjectAction: (p) => `${p.shortName} shown in use on a laptop or phone in an authentic workspace setting`,
+        environment: (p) => `professional but lived-in environment, ${p.visualDescription}`,
+        continuityCues: "screen content matches reference UI",
+      },
+    ],
+  },
 };
 
 // ── Model-specific prompt formatting ──
@@ -309,7 +404,9 @@ export function buildScenePrompt(
   }
 
   const prefix = getStylePrefix(adStyle, role);
-  const templates = ROLE_TEMPLATES[role] ?? ROLE_TEMPLATES.custom;
+  const family = siteTypeToFamily(product?.siteType);
+  const familyTemplates = ROLE_TEMPLATES[family] ?? ROLE_TEMPLATES.physical;
+  const templates = familyTemplates[role] ?? familyTemplates.custom;
   const template = templates[Math.floor(Math.random() * templates.length)];
 
   const p: ProductContext = product ?? {
@@ -341,13 +438,17 @@ export function buildScenePrompt(
 export function scrapeToProductContext(product: {
   title: string;
   description: string;
-  price: string;
+  price?: string;
   brand: string;
   images: string[];
   category?: string;
   color?: string;
   material?: string;
   keywords?: string[];
+  siteType?: SiteType;
+  productKind?: string;
+  features?: string[];
+  ctaText?: string;
 }): ProductContext {
   const name = cleanForPrompt(product.title || "the product");
   // Smart truncation: at word boundary, max ~40 chars
@@ -355,24 +456,42 @@ export function scrapeToProductContext(product: {
     ? name.slice(0, name.lastIndexOf(" ", 40)).trim() || name.slice(0, 40)
     : name;
   const desc = product.description || "";
+  const siteType: SiteType = product.siteType ?? "ecommerce";
 
-  // Build visual description from ENTITIES (much richer than keyword search)
-  const visualCues = buildVisualDescription(name, desc, product.category, product.color, product.material);
+  // Build visual description — branches on siteType (physical vs digital)
+  const visualCues = buildVisualDescription(
+    name,
+    desc,
+    siteType,
+    product.category,
+    product.color,
+    product.material,
+    product.productKind,
+  );
 
   // Find key benefit — expanded keyword list + first sentence fallback
   const sentences = desc.split(/[.!]/).map((s) => s.trim()).filter((s) => s.length > 10 && s.length < 120);
   const benefitSentence = sentences.find((s) =>
-    /easy|fast|comfort|premium|professional|powerful|lightweight|durable|natural|organic|smooth|soft|perfect|convenient|ergonomic|hypoallergenic|weatherproof|antimicrobial|breathable|waterproof|rechargeable|portable|compact|adjustable|versatile|sustainable/i.test(s),
+    /easy|fast|comfort|premium|professional|powerful|lightweight|durable|natural|organic|smooth|soft|perfect|convenient|ergonomic|hypoallergenic|weatherproof|antimicrobial|breathable|waterproof|rechargeable|portable|compact|adjustable|versatile|sustainable|saves|automate|automatic|instant|simple|seamless|secure|scalable|unified|collaborative|realtime|real-time|intelligent|smart|productive|efficient/i.test(s),
   );
+
+  // For non-ecommerce, use the first feature bullet as a fallback keyBenefit
+  const featureFallback = siteType !== "ecommerce" && product.features && product.features.length > 0
+    ? product.features[0]
+    : "";
 
   return {
     name,
     shortName,
     description: desc,
-    keyBenefit: benefitSentence || sentences[0] || "",
+    keyBenefit: benefitSentence || sentences[0] || featureFallback || "",
     price: product.price || "",
     brand: product.brand || "",
     visualDescription: visualCues,
+    siteType,
+    productKind: product.productKind,
+    features: product.features,
+    ctaText: product.ctaText,
   };
 }
 
@@ -390,15 +509,24 @@ function cleanForPrompt(s: string): string {
 
 /**
  * Build a rich visual description from extracted entities.
- * Uses category, color, material when available instead of keyword guessing.
+ * Branches on siteType:
+ *   - ecommerce → physical product description (color, material, shape)
+ *   - saas/app/service/generic → interface description (device kind, UI hint)
  */
 function buildVisualDescription(
   name: string,
   desc: string,
+  siteType: SiteType,
   category?: string,
   color?: string,
   material?: string,
+  productKind?: string,
 ): string {
+  // Digital products: describe the interface + device, not color/material
+  if (siteType !== "ecommerce") {
+    return buildDigitalVisualDescription(name, desc, siteType, productKind);
+  }
+
   const parts: string[] = [];
 
   // Color from entity extraction (best) or keyword fallback
@@ -433,6 +561,49 @@ function buildVisualDescription(
   }
 
   return parts.join(" ") + ", matching the reference image exactly";
+}
+
+/**
+ * Build a visual description for digital products (SaaS / apps / services).
+ * Focuses on the device + interface kind, not physical attributes.
+ */
+function buildDigitalVisualDescription(
+  name: string,
+  desc: string,
+  siteType: SiteType,
+  productKind?: string,
+): string {
+  const kind = productKind?.toLowerCase() ?? "";
+  const combined = `${name} ${desc}`.toLowerCase();
+
+  // Decide device kind
+  let device: string;
+  if (siteType === "app") {
+    device = "mobile app interface on a phone screen";
+  } else if (siteType === "saas") {
+    device = "web dashboard interface on a laptop screen";
+  } else if (siteType === "service") {
+    device = "landing page in a browser on a laptop screen";
+  } else if (kind.includes("mobile") || kind.includes("ios") || kind.includes("android") || combined.includes("app store")) {
+    device = "mobile app interface on a phone screen";
+  } else {
+    // generic — default to laptop browser
+    device = "landing page in a browser on a laptop screen";
+  }
+
+  // Extract a short descriptive phrase from the description (first 80 chars at word boundary)
+  const cleanedDesc = desc.replace(/\s+/g, " ").trim();
+  const shortPhrase = cleanedDesc.length > 0
+    ? (cleanedDesc.length > 80
+        ? cleanedDesc.slice(0, cleanedDesc.lastIndexOf(" ", 80)).trim() || cleanedDesc.slice(0, 80)
+        : cleanedDesc)
+    : "";
+
+  const parts = [device];
+  if (shortPhrase) parts.push(shortPhrase);
+  parts.push("UI matches reference screenshot exactly");
+
+  return parts.join(", ");
 }
 
 // Old extractVisualCues removed — replaced by buildVisualDescription with entity support

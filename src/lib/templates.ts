@@ -185,8 +185,10 @@ export const TEMPLATE_CATALOG: Template[] = [
 export function applyTemplate(
   template: Template,
   productName?: string,
+  aspectRatio?: string,
 ): Omit<Scene, "id">[] {
   const name = productName?.trim() || "your product";
+  const ar = aspectRatio ?? template.aspectRatio;
 
   return template.scenes.map((ts, i) => {
     const dur = clampDuration(ts.modelName, ts.duration);
@@ -196,7 +198,7 @@ export function applyTemplate(
       modelId: modelId(ts.modelName),
       prompt: ts.promptTemplate.replace(/\[PRODUCT\]/g, name),
       duration: dur,
-      aspectRatio: template.aspectRatio,
+      aspectRatio: ar,
       trimStart: 0,
       trimEnd: dur,
       voiceoverText: "",

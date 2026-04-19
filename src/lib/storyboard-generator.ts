@@ -1,20 +1,39 @@
 import { MODEL_CATALOG, type Scene, type SceneRole } from "@/types";
-import { buildScenePrompt, scrapeToProductContext, type ProductContext } from "@/lib/prompt-engine";
+import {
+  buildScenePrompt,
+  scrapeToProductContext,
+  type ProductContext,
+  type SiteType,
+} from "@/lib/prompt-engine";
 
 /**
  * Product data extracted from a URL scrape.
+ * Mirrors the shape returned by /api/scrape.
  */
 export interface ProductData {
   title: string;
   description: string;
-  price: string;
+  /** Optional because non-ecommerce pages may not have a price */
+  price?: string;
   images: string[];
   brand: string;
   source: string;
+  /** What kind of site this came from — drives voiceover angle + templates */
+  siteType?: SiteType;
   category?: string;
   color?: string;
   material?: string;
   keywords?: string[];
+  /** Short noun for the product ("mobile app", "dashboard", etc.) */
+  productKind?: string;
+  /** Feature bullets extracted from landing page */
+  features?: string[];
+  /** Primary CTA button text */
+  ctaText?: string;
+  /** Pricing tier labels (e.g. "Free", "Pro $20/mo") */
+  pricingTiers?: string[];
+  /** Screenshot image URLs filtered from the page */
+  screenshotUrls?: string[];
 }
 
 /**
@@ -35,7 +54,10 @@ const AD_STRUCTURE: {
 /**
  * Generate a 4-scene ad storyboard from product data using the prompt engine.
  */
-export function generateProductStoryboard(product: ProductData): Omit<Scene, "id">[] {
+export function generateProductStoryboard(
+  product: ProductData,
+  aspectRatio: string = "9:16",
+): Omit<Scene, "id">[] {
   const productCtx = scrapeToProductContext(product);
 
   // First pass: resolve models and durations for each scene
@@ -78,7 +100,7 @@ export function generateProductStoryboard(product: ProductData): Omit<Scene, "id
       modelId: s.model.id,
       prompt,
       duration: s.duration,
-      aspectRatio: "9:16",
+      aspectRatio,
       trimStart: 0,
       trimEnd: s.duration,
       voiceoverText: vo,
@@ -141,7 +163,13 @@ function buildVoiceovers(
 
   type AdAngle = { hook: string; solution: string; proof: string; cta: string };
 
-  const angles: AdAngle[] = [
+  // A short feature phrase (used by digital angles) — prefer first feature, fall back to benefit
+  const feature = p.features && p.features.length > 0
+    ? p.features[0].replace(/[.!]$/, "").slice(0, 50)
+    : benefit || "everything you need";
+
+  // Physical product angles (ecommerce)
+  const PHYSICAL_ANGLES: AdAngle[] = [
     // Convenience — uses benefit
     {
       hook: "Okay I have to show you this.",
@@ -179,6 +207,47 @@ function buildVoiceovers(
     },
   ];
 
+  // Digital angles — SaaS / apps / services / landing pages
+  const ctaBase = p.ctaText ? p.ctaText.replace(/\.$/, "") : "Link in bio";
+  const DIGITAL_ANGLES: AdAngle[] = [
+    // Productivity
+    {
+      hook: "This tool saved me like five hours this week.",
+      solution: `${name}. ${feature}.`,
+      proof: "Can't believe I was doing this manually.",
+      cta: `${ctaBase}. ${name}.`,
+    },
+    // Problem-solve
+    {
+      hook: "If you've ever struggled with this, watch.",
+      solution: `${name} handles ${feature}.`,
+      proof: "Finally, something that just works.",
+      cta: `${ctaBase}. Try it.`,
+    },
+    // Time-save
+    {
+      hook: "Wait. This does it in ten seconds?",
+      solution: `Meet ${name}. ${feature}.`,
+      proof: "I've been sleeping on this for months.",
+      cta: `${name}. ${ctaBase}.`,
+    },
+    // Discovery
+    {
+      hook: "Okay you need to know about this.",
+      solution: `${name}. ${feature}.`,
+      proof: "Already told three friends.",
+      cta: `${ctaBase}. Link below.`,
+    },
+    // Before/after
+    {
+      hook: "My workflow before vs after this tool.",
+      solution: `${name}. Everything in one place.`,
+      proof: "Night and day difference.",
+      cta: `${name}. ${ctaBase}.`,
+    },
+  ];
+
+  const angles = p.siteType && p.siteType !== "ecommerce" ? DIGITAL_ANGLES : PHYSICAL_ANGLES;
   const angle = angles[Math.floor(Math.random() * angles.length)];
 
   // Enforce word budgets per scene
@@ -200,6 +269,46 @@ function buildVoiceovers(
 
 function findModel(name: string) {
   return MODEL_CATALOG.find((m) => m.name === name);
+}
+
+/**
+ * Build a style brief string for a product that's passed to every scene's
+ * prompt/generation so all scenes share the same visual DNA.
+ *
+ * Branches on siteType:
+ *   - ecommerce → physical-product-hands-holding-it brief
+ *   - digital (saas/app/service/generic) → device-with-interface-on-screen brief
+ *
+ * Falls back to ecommerce for legacy saved projects without a siteType.
+ */
+export function buildStyleBrief(product: ProductData): string {
+  const title = product.title || "the product";
+  const description = product.description || "";
+  const shortDesc = description.length > 400 ? description.slice(0, 400) : description;
+  const siteType: SiteType = product.siteType ?? "ecommerce";
+  const isDigital = siteType !== "ecommerce";
+
+  const visualCore = isDigital
+    ? `The app or interface must be clearly visible on a device screen (laptop or phone) — UI content matches the reference screenshot exactly, no invented buttons, menus, or text.`
+    : `The product must be clearly visible and unaltered throughout every scene — preserve its exact shape, color, proportions, and surface details from the reference image.`;
+
+  const actorCue = isDigital
+    ? `The person on camera must be interacting with the interface on a laptop or phone — hands typing, thumb swiping, cursor clicking. Screen content matches the reference exactly.`
+    : `The person on camera must be holding or interacting with this specific product — not a similar product, not a different variant.`;
+
+  const continuity = isDigital
+    ? `Keep the UI, logo, and brand name consistent across all scenes. Avoid fake screens, hallucinated dashboards, or unrelated interfaces.`
+    : `Keep packaging, labels, logo, and color consistent across all scenes. Avoid generic stock imagery of similar items.`;
+
+  const parts = [
+    `Product: ${title}.`,
+    shortDesc ? `About: ${shortDesc}.` : "",
+    visualCore,
+    actorCue,
+    continuity,
+  ].filter(Boolean);
+
+  return parts.join(" ");
 }
 
 /**

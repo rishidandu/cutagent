@@ -45,7 +45,7 @@ export async function exportProject(
   scenes: Scene[],
   audioTracks?: AudioTrack[],
   onProgress?: (msg: string) => void,
-  options?: { captions?: boolean },
+  options?: { captions?: boolean; aspectRatio?: string },
 ): Promise<void> {
   const completed = scenes.filter((s) => s.videoUrl);
   if (completed.length === 0) {
@@ -67,7 +67,7 @@ export async function exportProject(
 
   // Use FFmpeg for stitching + audio mixing
   try {
-    const blob = await stitchWithFFmpeg(completed, audioTracks ?? [], onProgress);
+    const blob = await stitchWithFFmpeg(completed, audioTracks ?? [], onProgress, options?.aspectRatio);
 
     // If captions requested, do a second pass server-side
     const wantCaptions = options?.captions && completed.some((s) => s.voiceoverText?.trim());
@@ -142,17 +142,46 @@ async function stitchWithFFmpeg(
   scenes: Scene[],
   audioTracks: AudioTrack[],
   onProgress?: (msg: string) => void,
+  projectAspectRatio?: string,
 ): Promise<Blob> {
   const { FFmpeg } = await import("@ffmpeg/ffmpeg");
-  const { fetchFile } = await import("@ffmpeg/util");
+  const { fetchFile, toBlobURL } = await import("@ffmpeg/util");
 
   const ffmpeg = new FFmpeg();
 
   onProgress?.("Loading FFmpeg (first time may take a moment)...");
-  await ffmpeg.load({
-    coreURL: "https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm/ffmpeg-core.js",
-    wasmURL: "https://unpkg.com/@ffmpeg/core@0.12.10/dist/esm/ffmpeg-core.wasm",
-  });
+
+  // @ffmpeg/ffmpeg@0.12.x spins up a classic Web Worker that loads core via
+  // importScripts(), which only accepts classic scripts — not ES modules.
+  // We must point at /dist/umd, not /dist/esm. Additionally, `toBlobURL`
+  // rewrites the URLs as same-origin blob: URLs so the cross-origin wasm
+  // reference inside the core script resolves.
+  // Fall back to jsdelivr if unpkg is blocked/unreachable.
+  const cdns = [
+    "https://unpkg.com/@ffmpeg/core@0.12.10/dist/umd",
+    "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd",
+  ];
+  let loaded = false;
+  let lastErr: unknown;
+  for (const base of cdns) {
+    try {
+      const [coreURL, wasmURL] = await Promise.all([
+        toBlobURL(`${base}/ffmpeg-core.js`, "text/javascript"),
+        toBlobURL(`${base}/ffmpeg-core.wasm`, "application/wasm"),
+      ]);
+      await ffmpeg.load({ coreURL, wasmURL });
+      loaded = true;
+      break;
+    } catch (e) {
+      lastErr = e;
+      console.warn(`[ffmpeg-load] failed from ${base}:`, e);
+    }
+  }
+  if (!loaded) {
+    throw new Error(
+      `Could not load FFmpeg.wasm from any CDN — ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`,
+    );
+  }
 
   // ── Step 1: Download all scene videos ──
   const videoFiles: string[] = [];
@@ -205,27 +234,72 @@ async function stitchWithFFmpeg(
   }
 
   // ── Step 4: Concat videos ──
+  // The concat demuxer with -c copy silently truncates to the first input's
+  // duration when codec params don't match (different fal.ai models produce
+  // different streams). We always re-encode to avoid the silent-corruption bug.
   onProgress?.("Stitching scenes...");
-  const concatList = videoFiles.map((f) => `file '${f}'`).join("\n");
-  await ffmpeg.writeFile("concat.txt", new TextEncoder().encode(concatList));
 
-  // Use stream copy first (fast), re-encode only if it fails
-  try {
+  // Prefer the project-wide canvas ratio (single source of truth). Falls back
+  // to the first scene's AR for older projects that predate project-level AR.
+  const firstScene = scenes.find((s) => s.videoUrl);
+  const ar = projectAspectRatio ?? firstScene?.aspectRatio ?? "9:16";
+  const [tw, th] = ar === "16:9" ? [1280, 720]
+    : ar === "1:1" ? [1080, 1080]
+    : ar === "4:3" ? [960, 720]
+    : ar === "3:4" ? [720, 960]
+    : [720, 1280];
+  const normFilter =
+    `scale=${tw}:${th}:force_original_aspect_ratio=decrease,` +
+    `pad=${tw}:${th}:(ow-iw)/2:(oh-ih)/2,setsar=1`;
+
+  if (videoFiles.length === 1) {
     await ffmpeg.exec([
-      "-f", "concat", "-safe", "0", "-i", "concat.txt",
-      "-c", "copy", "-an",
-      "video_only.mp4",
-    ]);
-  } catch {
-    // Stream copy failed (different codecs) — re-encode
-    onProgress?.("Re-encoding scenes (different codecs detected)...");
-    await ffmpeg.exec([
-      "-f", "concat", "-safe", "0", "-i", "concat.txt",
-      "-vf", "scale=720:-2",
+      "-i", videoFiles[0],
+      "-vf", normFilter,
+      "-r", "24",
       "-pix_fmt", "yuv420p",
       "-an",
       "video_only.mp4",
     ]);
+  } else {
+    // Try 1: concat demuxer with re-encode — memory-efficient, processes one
+    // input at a time. Works when all inputs share a pixel format.
+    const concatList = videoFiles.map((f) => `file '${f}'`).join("\n");
+    await ffmpeg.writeFile("concat.txt", new TextEncoder().encode(concatList));
+
+    try {
+      await ffmpeg.exec([
+        "-f", "concat", "-safe", "0", "-i", "concat.txt",
+        "-vf", normFilter,
+        "-r", "24",
+        "-pix_fmt", "yuv420p",
+        "-an",
+        "video_only.mp4",
+      ]);
+    } catch (concatErr) {
+      // Try 2: filter-complex concat — more robust for heterogenous sources,
+      // but loads every input simultaneously (higher memory use).
+      console.warn("concat demuxer failed, trying filter-complex:", concatErr);
+      onProgress?.("Retrying with full re-encode...");
+
+      const inputArgs = videoFiles.flatMap((f) => ["-i", f]);
+      const normChains = videoFiles.map((_, i) =>
+        `[${i}:v]${normFilter},fps=24[v${i}]`
+      );
+      const concatInputs = videoFiles.map((_, i) => `[v${i}]`).join("");
+      const filterComplex = [
+        ...normChains,
+        `${concatInputs}concat=n=${videoFiles.length}:v=1:a=0[outv]`,
+      ].join(";");
+
+      await ffmpeg.exec([
+        ...inputArgs,
+        "-filter_complex", filterComplex,
+        "-map", "[outv]",
+        "-pix_fmt", "yuv420p",
+        "video_only.mp4",
+      ]);
+    }
   }
 
   // ── Step 5: Concat voiceovers into one track ──

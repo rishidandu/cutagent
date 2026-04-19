@@ -10,6 +10,17 @@ import { resetCreditsToTier, addCredits } from "@/lib/credits";
  * Stripe webhook handler. Verifies signature, dispatches by event type.
  * Idempotent via credit_transactions.stripe_event_id unique index.
  */
+/**
+ * Extract period_end from a Stripe subscription.
+ * Newer API versions expose it on items.data[0], older on the top-level subscription.
+ */
+function extractPeriodEnd(sub: Stripe.Subscription): string | null {
+  const item = sub.items?.data?.[0] as unknown as { current_period_end?: number } | undefined;
+  const subAny = sub as unknown as { current_period_end?: number };
+  const sec = item?.current_period_end ?? subAny?.current_period_end;
+  return sec ? new Date(sec * 1000).toISOString() : null;
+}
+
 export async function POST(req: NextRequest) {
   if (!isStripeConfigured()) {
     return NextResponse.json({ error: "Not configured" }, { status: 503 });
@@ -55,7 +66,7 @@ export async function POST(req: NextRequest) {
           stripe_subscription_id: sub.id,
           subscription_tier: tier,
           subscription_status: sub.status,
-          period_end: new Date((sub as unknown as { current_period_end: number }).current_period_end * 1000).toISOString(),
+          ...(extractPeriodEnd(sub) ? { period_end: extractPeriodEnd(sub)! } : {}),
         }).eq("id", userId);
 
         await resetCreditsToTier(userId, tier, event.id);
@@ -81,7 +92,7 @@ export async function POST(req: NextRequest) {
 
         await supabase.from("users").update({
           subscription_status: "active",
-          period_end: new Date((sub as unknown as { current_period_end: number }).current_period_end * 1000).toISOString(),
+          ...(extractPeriodEnd(sub) ? { period_end: extractPeriodEnd(sub)! } : {}),
         }).eq("id", user.id);
 
         await resetCreditsToTier(user.id, tier, event.id);
@@ -113,7 +124,7 @@ export async function POST(req: NextRequest) {
         await supabase.from("users").update({
           subscription_tier: newTier,
           subscription_status: sub.status,
-          period_end: new Date((sub as unknown as { current_period_end: number }).current_period_end * 1000).toISOString(),
+          ...(extractPeriodEnd(sub) ? { period_end: extractPeriodEnd(sub)! } : {}),
         }).eq("id", user.id);
         break;
       }

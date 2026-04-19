@@ -107,9 +107,9 @@ export default function ProductImport({ open, onClose, onImport, onHookLab }: Pr
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h2 className="text-sm font-bold text-zinc-100">Import Product</h2>
+            <h2 className="text-sm font-bold text-zinc-100">Import URL</h2>
             <p className="text-[11px] text-zinc-500 mt-0.5">
-              Paste a product URL to auto-generate an ad storyboard
+              Paste any URL — product page, SaaS app, or landing page — to auto-generate an ad storyboard
             </p>
           </div>
           <button
@@ -251,7 +251,7 @@ export default function ProductImport({ open, onClose, onImport, onHookLab }: Pr
         {!product && !loading && (
           <div className="text-center py-3 mb-4">
             <p className="text-[11px] text-zinc-600">
-              Supports Shopify, Amazon, Etsy, and most product pages with OpenGraph tags
+              Supports Shopify, Amazon, Etsy, SaaS apps, app stores, and most landing pages
             </p>
           </div>
         )}

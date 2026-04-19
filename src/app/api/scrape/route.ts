@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
     const html = await resp.text();
 
     // Extract metadata from HTML
-    const product = extractProductData(html, parsed.hostname);
+    const product = extractProductData(html, parsed.hostname, parsed.pathname);
 
     return NextResponse.json(product);
   } catch (err) {
@@ -132,6 +132,7 @@ async function tryShopifyJson(parsed: URL): Promise<ProductData | null> {
       images: images.slice(0, 8),
       brand: p.vendor || parsed.hostname.replace("www.", ""),
       source: "shopify",
+      siteType: "ecommerce",
       category,
       color,
       material,
@@ -144,21 +145,32 @@ async function tryShopifyJson(parsed: URL): Promise<ProductData | null> {
 
 // ── HTML metadata extraction ──
 
+export type SiteType = "ecommerce" | "saas" | "app" | "service" | "generic";
+
 interface ProductData {
   title: string;
   description: string;
-  price: string;
+  /** Optional for non-ecommerce sites */
+  price?: string;
   images: string[];
   brand: string;
   source: string;
-  /** Extracted product entities for better prompting */
+  /** What kind of site this is — drives prompt + voiceover templates */
+  siteType: SiteType;
+  /** Physical product entities (only for ecommerce) */
   category?: string;
   color?: string;
   material?: string;
   keywords?: string[];
+  /** Digital product fields (for saas/app/service/generic) */
+  productKind?: string;
+  features?: string[];
+  ctaText?: string;
+  pricingTiers?: string[];
+  screenshotUrls?: string[];
 }
 
-function extractProductData(html: string, hostname: string): ProductData {
+function extractProductData(html: string, hostname: string, pathname: string): ProductData {
   const meta = (name: string): string => {
     // Try property= first (OpenGraph), then name=
     const ogMatch = html.match(
@@ -298,17 +310,28 @@ function extractProductData(html: string, hostname: string): ProductData {
   const brand =
     meta("og:site_name") || meta("product:brand") || hostname.replace("www.", "");
 
-  // Determine source type
+  // Determine source type (legacy)
   let source = "generic";
   if (hostname.includes("shopify") || html.includes("Shopify.theme")) source = "shopify";
   else if (hostname.includes("amazon")) source = "amazon";
   else if (hostname.includes("etsy")) source = "etsy";
   else if (hostname.includes("ebay")) source = "ebay";
 
+  // Determine site type (new — drives templates)
+  const siteType = detectSiteType(hostname, pathname, html, !!price);
+
   // Clean up and upscale image URLs
   const cleanImages = images
     .map((u) => upscaleImageUrl(decodeHtmlEntities(u)))
     .slice(0, 6);
+
+  // Extract digital product fields only when non-ecommerce
+  const isDigital = siteType !== "ecommerce";
+  const features = isDigital ? extractFeatures(html) : undefined;
+  const ctaText = isDigital ? extractCtaText(html) : undefined;
+  const pricingTiers = isDigital ? extractPricingTiers(html) : undefined;
+  const screenshotUrls = isDigital ? extractScreenshots(cleanImages) : undefined;
+  const productKind = isDigital ? inferProductKind(title, description, siteType) : undefined;
 
   return {
     title,
@@ -317,11 +340,161 @@ function extractProductData(html: string, hostname: string): ProductData {
     images: cleanImages,
     brand,
     source,
-    category,
-    color,
-    material,
+    siteType,
+    category: isDigital ? undefined : category,
+    color: isDigital ? undefined : color,
+    material: isDigital ? undefined : material,
     keywords,
+    productKind,
+    features,
+    ctaText,
+    pricingTiers,
+    screenshotUrls,
   };
+}
+
+/**
+ * Heuristically detect what kind of site this is.
+ * First type to hit 2+ signals wins. Fallback: "generic".
+ */
+function detectSiteType(hostname: string, pathname: string, html: string, hasPrice: boolean): SiteType {
+  const htmlLower = html.toLowerCase();
+
+  // ── Step 1: Strong ecommerce ──
+  let ecommerceScore = 0;
+  if (hostname.includes("shopify") || html.includes("Shopify.theme")) ecommerceScore += 3;
+  if (/amazon\.|walmart\.|target\.|etsy\.|ebay\./.test(hostname)) ecommerceScore += 3;
+  if (/\/products?\/|\/p\/|\/item\//i.test(pathname)) ecommerceScore += 2;
+  if (/"@type"\s*:\s*"Product"/.test(html)) ecommerceScore += 2;
+  if (hasPrice && /\$\d+\.?\d*/.test(html)) ecommerceScore += 1;
+  if (/add\s+to\s+(cart|bag)|buy\s+now|checkout\s+now/.test(htmlLower)) ecommerceScore += 2;
+  if (ecommerceScore >= 2) return "ecommerce";
+
+  // ── Step 2: Mobile app ──
+  let appScore = 0;
+  if (/apps\.apple\.com|play\.google\.com/.test(hostname)) appScore += 3;
+  if (/download\s+on\s+the\s+app\s+store|get\s+it\s+on\s+google\s+play|testflight/.test(htmlLower)) appScore += 2;
+  if (/<meta\s+name=["']apple-itunes-app["']/.test(html)) appScore += 2;
+  if (/itms-apps:\/\//.test(html)) appScore += 1;
+  if (appScore >= 2) return "app";
+
+  // ── Step 3: SaaS ──
+  let saasScore = 0;
+  if (/start\s+(free\s+trial|for\s+free)|sign\s+up\s+free|start\s+trial|get\s+started\s+free|book\s+a\s+demo|request\s+a\s+demo|try\s+it\s+free/.test(htmlLower)) saasScore += 2;
+  if (/per\s+(month|user|seat)|\/mo\b|\/month\b|\/user\b|\/seat\b/.test(htmlLower)) saasScore += 2;
+  if (/\b(dashboard|login|sign\s+in)\b/.test(htmlLower) && /(pricing|features|docs|api)/i.test(htmlLower)) saasScore += 1;
+  if (/\b(API|SDK|integrations?|webhooks?)\b/.test(html)) saasScore += 1;
+  if (saasScore >= 2) return "saas";
+
+  // ── Step 4: Service ──
+  let serviceScore = 0;
+  if (/book\s+(a\s+)?call|schedule\s+(a\s+)?(consultation|call)|get\s+(a\s+)?quote|contact\s+sales|hire\s+us|our\s+services/.test(htmlLower)) serviceScore += 2;
+  if (/\/services|\/what-we-do|\/work\b/i.test(pathname)) serviceScore += 1;
+  if (serviceScore >= 2) return "service";
+
+  return "generic";
+}
+
+/**
+ * Extract prominent CTA button text from HTML.
+ */
+function extractCtaText(html: string): string | undefined {
+  // Try: anchor/button with cta/primary/hero class
+  const classMatch = html.match(/<(?:a|button)[^>]*class=["'][^"']*(?:primary|cta|hero|main)[^"']*["'][^>]*>([^<]{2,40})</i);
+  if (classMatch?.[1]) return decodeHtmlEntities(classMatch[1].trim());
+
+  // Try: anchors with action words
+  const actionMatches = Array.from(
+    html.matchAll(/<(?:a|button)[^>]*>\s*([A-Z][^<]{2,30}(?:start|try|book|get\s+started|sign\s+up|download|buy|demo)[^<]{0,20})\s*</gi)
+  );
+  if (actionMatches.length > 0) {
+    const shortest = actionMatches
+      .map((m) => decodeHtmlEntities(m[1].trim()))
+      .sort((a, b) => a.length - b.length)[0];
+    if (shortest && shortest.length <= 30) return shortest;
+  }
+  return undefined;
+}
+
+/**
+ * Extract up to 5 feature bullets from the landing page.
+ */
+function extractFeatures(html: string): string[] | undefined {
+  const features: string[] = [];
+
+  // Try: <ul> inside a section with "features" in the heading/class
+  const featuresSection = html.match(/<(?:section|div)[^>]*(?:class|id)=["'][^"']*features?[^"']*["'][^>]*>([\s\S]{0,5000}?)<\/(?:section|div)>/i);
+  if (featuresSection?.[1]) {
+    const lis = Array.from(featuresSection[1].matchAll(/<(?:li|h3)[^>]*>([\s\S]*?)<\/(?:li|h3)>/gi));
+    for (const li of lis) {
+      const text = decodeHtmlEntities(li[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
+      if (text && text.length >= 5 && text.length <= 80 && !features.includes(text)) {
+        features.push(text);
+      }
+      if (features.length >= 5) break;
+    }
+  }
+
+  // Fallback: first h2/h3 outside nav
+  if (features.length === 0) {
+    const headings = Array.from(html.matchAll(/<h[23][^>]*>([\s\S]*?)<\/h[23]>/gi));
+    for (const h of headings) {
+      // skip if inside nav
+      const text = decodeHtmlEntities(h[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
+      if (text && text.length >= 8 && text.length <= 80 && !/^(home|features|pricing|docs|about|contact|login|sign\s+in|sign\s+up)$/i.test(text)) {
+        if (!features.includes(text)) features.push(text);
+      }
+      if (features.length >= 5) break;
+    }
+  }
+
+  return features.length > 0 ? features : undefined;
+}
+
+/**
+ * Extract pricing tiers (e.g. ["Free", "Pro $29/mo", "Team $99/mo"]).
+ */
+function extractPricingTiers(html: string): string[] | undefined {
+  const tiers: string[] = [];
+  const tierRegex = /(Free|Starter|Basic|Pro|Plus|Team|Business|Enterprise|Premium)\s*[-:]?\s*(\$\d+(?:\.\d+)?)?(?:\s*\/?\s*(mo|user|month|seat|yr|year))?/gi;
+  const seen = new Set<string>();
+  for (const m of html.matchAll(tierRegex)) {
+    const name = m[1];
+    const price = m[2];
+    const unit = m[3];
+    const label = price ? `${name} ${price}${unit ? `/${unit}` : ""}` : name;
+    if (!seen.has(label.toLowerCase())) {
+      seen.add(label.toLowerCase());
+      tiers.push(label);
+    }
+    if (tiers.length >= 4) break;
+  }
+  return tiers.length > 0 ? tiers : undefined;
+}
+
+/**
+ * Filter images for screenshot-like URLs (dashboard, UI, interface).
+ */
+function extractScreenshots(images: string[]): string[] | undefined {
+  const matches = images.filter((url) =>
+    /screenshot|dashboard|interface|ui|app-|product-shot|demo/i.test(url),
+  );
+  return matches.length > 0 ? matches.slice(0, 3) : undefined;
+}
+
+/**
+ * Infer product kind from title/description.
+ */
+function inferProductKind(title: string, description: string, siteType: SiteType): string {
+  const combined = `${title} ${description}`.toLowerCase();
+  const kindMatch = combined.match(/\b(is|the)\s+(a|an)\s+([a-z][a-z\s]{2,30}?)\s+(for|that|which|to)\b/);
+  if (kindMatch?.[3]) return kindMatch[3].trim();
+
+  // Fallback per siteType
+  if (siteType === "app") return "mobile app";
+  if (siteType === "saas") return "web app";
+  if (siteType === "service") return "service";
+  return "tool";
 }
 
 /**

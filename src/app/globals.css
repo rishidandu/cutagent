@@ -141,3 +141,152 @@ button:disabled {
 .mono-ui {
   font-family: var(--font-ibm-plex-mono), ui-monospace, monospace;
 }
+
+/* ── Landing page — cinematic graphics ── */
+
+/* Aurora mesh that slowly drifts behind the hero */
+@keyframes aurora-1 {
+  0%, 100% { transform: translate3d(-6%, -8%, 0) scale(1); }
+  50%      { transform: translate3d(4%, 6%, 0)  scale(1.08); }
+}
+@keyframes aurora-2 {
+  0%, 100% { transform: translate3d(6%, 4%, 0)  scale(1); }
+  50%      { transform: translate3d(-4%, -6%, 0) scale(1.12); }
+}
+@keyframes aurora-3 {
+  0%, 100% { transform: translate3d(0%, -4%, 0) scale(1); }
+  50%      { transform: translate3d(-2%, 8%, 0) scale(1.05); }
+}
+.aurora-blob-1 { animation: aurora-1 22s ease-in-out infinite; will-change: transform; }
+.aurora-blob-2 { animation: aurora-2 28s ease-in-out infinite; will-change: transform; }
+.aurora-blob-3 { animation: aurora-3 36s ease-in-out infinite; will-change: transform; }
+
+/* Pulse dot — "generating" indicator */
+@keyframes status-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(83, 212, 255, 0.45); }
+  50%      { opacity: 0.6; box-shadow: 0 0 0 6px rgba(83, 212, 255, 0); }
+}
+.status-pulse {
+  animation: status-pulse 1.8s ease-out infinite;
+}
+
+/* Marquee ticker (infinite horizontal scroll) */
+@keyframes marquee {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+.marquee-track {
+  animation: marquee 38s linear infinite;
+  will-change: transform;
+}
+.marquee-mask {
+  -webkit-mask-image: linear-gradient(to right, transparent 0%, black 8%, black 92%, transparent 100%);
+          mask-image: linear-gradient(to right, transparent 0%, black 8%, black 92%, transparent 100%);
+}
+
+/* Scene-card "generating" progress fill */
+@keyframes scene-progress-1 {
+  0%   { width: 0%; }
+  40%  { width: 68%; }
+  60%  { width: 76%; }
+  100% { width: 100%; }
+}
+@keyframes scene-progress-2 {
+  0%, 25% { width: 0%; }
+  65%     { width: 54%; }
+  100%    { width: 100%; }
+}
+@keyframes scene-progress-3 {
+  0%, 45% { width: 0%; }
+  85%     { width: 40%; }
+  100%    { width: 94%; }
+}
+@keyframes scene-progress-4 {
+  0%, 65% { width: 0%; }
+  100%    { width: 62%; }
+}
+.scene-progress-1 { animation: scene-progress-1 6s ease-in-out infinite alternate; }
+.scene-progress-2 { animation: scene-progress-2 6s ease-in-out infinite alternate; }
+.scene-progress-3 { animation: scene-progress-3 6s ease-in-out infinite alternate; }
+.scene-progress-4 { animation: scene-progress-4 6s ease-in-out infinite alternate; }
+
+/* Subtle float for scene cards */
+@keyframes card-float {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-4px); }
+}
+.card-float-1 { animation: card-float 6s ease-in-out infinite; }
+.card-float-2 { animation: card-float 7s ease-in-out 0.8s infinite; }
+.card-float-3 { animation: card-float 8s ease-in-out 1.6s infinite; }
+.card-float-4 { animation: card-float 7.5s ease-in-out 2.4s infinite; }
+
+/* Sweeping highlight line (for film-reel edges) */
+@keyframes sweep {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(200%); }
+}
+.sweep-highlight {
+  animation: sweep 3.2s ease-in-out infinite;
+}
+
+/* Gradient text shimmer */
+@keyframes gradient-shift {
+  0%, 100% { background-position: 0% 50%; }
+  50%      { background-position: 100% 50%; }
+}
+.gradient-shift {
+  background-size: 200% 200%;
+  animation: gradient-shift 8s ease-in-out infinite;
+}
+
+/* Blinking cursor for type-in caption */
+@keyframes blink {
+  0%, 60% { opacity: 1; }
+  61%, 100% { opacity: 0; }
+}
+.blink { animation: blink 1.1s steps(2) infinite; }
+
+/* "VU meter" waveform bars for voiceover card */
+@keyframes vu-bar {
+  0%, 100% { transform: scaleY(0.2); }
+  50%      { transform: scaleY(1); }
+}
+.vu-bar {
+  transform-origin: center;
+  animation: vu-bar 0.9s ease-in-out infinite;
+}
+
+/* Conic spinner for "generating" badge */
+@keyframes spin-slow {
+  to { transform: rotate(360deg); }
+}
+.spin-slow { animation: spin-slow 4s linear infinite; }
+
+/* Glow that pulses on primary CTA */
+@keyframes cta-glow {
+  0%, 100% { box-shadow: 0 12px 40px rgba(83, 212, 255, 0.28), 0 0 0 0 rgba(83, 212, 255, 0.35); }
+  50%      { box-shadow: 0 12px 40px rgba(83, 212, 255, 0.40), 0 0 0 10px rgba(83, 212, 255, 0); }
+}
+.cta-glow { animation: cta-glow 2.6s ease-in-out infinite; }
+
+/* Scanline for CRT / film feel */
+.scanlines {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.025) 0px,
+    rgba(255, 255, 255, 0.025) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+}
+
+/* Film grain */
+.film-grain::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1   0 0 0 0 1   0 0 0 0 1   0 0 0 0.5 0'/></filter><rect width='100%' height='100%' filter='url(%23n)' opacity='0.55'/></svg>");
+  opacity: 0.045;
+  mix-blend-mode: overlay;
+}

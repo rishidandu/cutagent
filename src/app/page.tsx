@@ -15,6 +15,7 @@ import BrandKitPanel from "@/components/BrandKitPanel";
 import CompareModal from "@/components/CompareModal";
 import PreviewPlayer from "@/components/PreviewPlayer";
 import UserMenu from "@/components/UserMenu";
+import Logo from "@/components/Logo";
 import CreditsBadge from "@/components/CreditsBadge";
 import UpgradeModal from "@/components/UpgradeModal";
 import { useCredits } from "@/components/CreditsProvider";
@@ -24,7 +25,7 @@ import { configureFal, generateScene } from "@/lib/fal";
 import { TTS_MODELS, generateVoiceover } from "@/lib/audio";
 import { exportProject } from "@/lib/video-export";
 import { onSceneCompleted, planGenerationOrder } from "@/lib/style-engine";
-import { generateProductStoryboard, type ProductData } from "@/lib/storyboard-generator";
+import { generateProductStoryboard, buildStyleBrief, type ProductData } from "@/lib/storyboard-generator";
 import { scriptToScenes } from "@/lib/script-to-storyboard";
 import { applyTemplate, type Template } from "@/lib/templates";
 import { createDefaultBrandKit, brandKitToBrief, type BrandKit } from "@/lib/brand-kit";
@@ -38,7 +39,7 @@ import { MODEL_CATALOG, createDefaultStyleContext, type Scene, type StyleContext
 
 // ── Helpers ──
 
-function makeScene(index: number): Scene {
+function makeScene(index: number, aspectRatio: string = "9:16"): Scene {
   const dur = MODEL_CATALOG[0].supportedDurations[0];
   return {
     id: crypto.randomUUID(),
@@ -47,7 +48,7 @@ function makeScene(index: number): Scene {
     modelId: MODEL_CATALOG[0].id,
     prompt: "",
     duration: dur,
-    aspectRatio: "16:9",
+    aspectRatio,
     trimStart: 0,
     trimEnd: dur,
     voiceoverText: "",
@@ -68,17 +69,17 @@ function scenesFromPartials(partials: Omit<Scene, "id">[]): Scene[] {
 
 const STORAGE_KEY = "cutagent-project";
 
-function saveToStorage(scenes: Scene[], apiKey: string, styleContext: StyleContext) {
+function saveToStorage(scenes: Scene[], apiKey: string, styleContext: StyleContext, projectId: string | null) {
   try {
     // Don't save base64 reference images to localStorage (5MB limit).
     // Only save references that are hosted URLs.
     const safeRefs = styleContext.references.filter((r) => !r.url.startsWith("data:"));
     const safeCtx = { ...styleContext, references: safeRefs };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ scenes, apiKey, styleContext: safeCtx, savedAt: Date.now() }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ scenes, apiKey, styleContext: safeCtx, projectId, savedAt: Date.now() }));
   } catch { /* quota exceeded, ignore */ }
 }
 
-function loadFromStorage(): { scenes: Scene[]; apiKey: string; styleContext?: StyleContext } | null {
+function loadFromStorage(): { scenes: Scene[]; apiKey: string; styleContext?: StyleContext; projectId?: string | null } | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
@@ -102,6 +103,10 @@ function loadFromStorage(): { scenes: Scene[]; apiKey: string; styleContext?: St
           return true;
         });
       }
+      // Migrate: project-wide aspectRatio (falls back to first scene's AR)
+      if (data.styleContext && !data.styleContext.aspectRatio) {
+        data.styleContext.aspectRatio = data.scenes[0]?.aspectRatio ?? "9:16";
+      }
       return data;
     }
   } catch { /* corrupted, ignore */ }
@@ -117,6 +122,8 @@ export default function Home() {
   const [scenes, setScenes] = useState<Scene[]>([makeScene(0)]);
   const [selectedScene, setSelectedScene] = useState(0);
   const [styleContext, setStyleContext] = useState<StyleContext>(createDefaultStyleContext());
+  // Hoisted so mount-hydration + auto-save effects below can reference it.
+  const [projectId, setProjectId] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState("");
   const [audioTracks, setAudioTracks] = useState<AudioTrack[]>([]);
@@ -176,6 +183,11 @@ export default function Home() {
         configureFal(saved.apiKey);
         setKeySet(true);
       }
+      // Restore projectId so auto-save continues writing to the same sidebar
+      // entry instead of spawning a new one on every page refresh.
+      if (saved.projectId) {
+        setProjectId(saved.projectId);
+      }
     }
     // Mark mounted after initial load to avoid save race
     requestAnimationFrame(() => { mountedRef.current = true; });
@@ -185,9 +197,9 @@ export default function Home() {
   useEffect(() => {
     if (!mountedRef.current) return;
     if (scenes.length > 0) {
-      saveToStorage(scenes, keySet ? apiKey : "", styleContext);
+      saveToStorage(scenes, keySet ? apiKey : "", styleContext, projectId);
     }
-  }, [scenes, apiKey, keySet, styleContext]);
+  }, [scenes, apiKey, keySet, styleContext, projectId]);
 
   const updateScene = useCallback((updated: Scene) => {
     setScenes((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
@@ -195,7 +207,7 @@ export default function Home() {
 
   const addScene = () => {
     setScenes((prev) => {
-      const next = [...prev, makeScene(prev.length)];
+      const next = [...prev, makeScene(prev.length, styleContext.aspectRatio)];
       // Use functional update to avoid stale closure — prev.length is the new scene's index
       setSelectedScene(prev.length);
       return next;
@@ -205,7 +217,7 @@ export default function Home() {
   const removeScene = (id: string) => {
     setScenes((prev) => {
       const next = prev.filter((s) => s.id !== id).map((s, i) => ({ ...s, index: i }));
-      return next.length === 0 ? [makeScene(0)] : next;
+      return next.length === 0 ? [makeScene(0, styleContext.aspectRatio)] : next;
     });
     setSelectedScene((prev) => Math.max(0, prev - 1));
   };
@@ -219,6 +231,23 @@ export default function Home() {
     });
     setSelectedScene(toIndex);
   }, []);
+
+  // ── Project aspect ratio — single source of truth ──
+  // Changing the project canvas rewrites every scene's aspectRatio so the next
+  // Generate emits sources at the new canvas (no letterboxing at export time).
+  // Already-rendered scenes need a re-gen to match, so warn the user first.
+  const handleAspectRatioChange = (next: "9:16" | "16:9" | "1:1") => {
+    if (next === styleContext.aspectRatio) return;
+    const hasRenders = scenes.some((s) => s.videoUrl);
+    if (hasRenders) {
+      const ok = confirm(
+        `Switching to ${next} will letterbox any already-rendered scenes until you regenerate them. Continue?`,
+      );
+      if (!ok) return;
+    }
+    setStyleContext((prev) => ({ ...prev, aspectRatio: next }));
+    setScenes((prev) => prev.map((s) => ({ ...s, aspectRatio: next })));
+  };
 
   const connectKey = () => {
     if (!apiKey.trim()) return;
@@ -317,9 +346,11 @@ export default function Home() {
       const result = await generateScene({
         scene,
         styleContext,
-        onProgress: (status) => {
-          const progress = status === "Queued" ? 10 : 50;
-          updateScene({ ...scene, status: "generating", progress });
+        onProgress: (status, _logs, progress) => {
+          const nextProgress = typeof progress === "number"
+            ? progress
+            : (status === "Queued" ? 10 : 50);
+          updateScene({ ...scene, status: "generating", progress: nextProgress });
         },
       });
 
@@ -384,6 +415,7 @@ export default function Home() {
         progress: 0,
         error: errorMsg,
       });
+      removeActiveJob(scene.id);
     }
   };
 
@@ -395,6 +427,10 @@ export default function Home() {
     for (const batch of batches) {
       await Promise.all(batch.map((scene) => handleGenerate(scene)));
     }
+
+    // After videos finish, generate voiceovers for any scene with text but no audio.
+    // Without this, exporting right after "Generate All" produces a silent video.
+    await handleGenerateAllAudio();
   };
 
   // ── Export ──
@@ -404,7 +440,7 @@ export default function Home() {
     setIsExporting(true);
     setExportProgress("");
     try {
-      await exportProject(scenes, audioTracks, setExportProgress, { captions: exportWithCaptions });
+      await exportProject(scenes, audioTracks, setExportProgress, { captions: exportWithCaptions, aspectRatio: styleContext.aspectRatio });
     } catch (err) {
       alert(err instanceof Error ? err.message : "Export failed");
     } finally {
@@ -414,9 +450,12 @@ export default function Home() {
   };
 
   // ── Project Save/Load ──
-  const [projectId, setProjectId] = useState<string | null>(null);
+  // projectId is declared near the top of the component so the mount-hydration
+  // effect and the auto-save effect can reference it without a TDZ error.
   const [savedProjects, setSavedProjects] = useState<{ id: string; name: string; updated_at: string }[]>([]);
   const [showProjectPicker, setShowProjectPicker] = useState(false);
+  const cloudCreateReqRef = useRef(0);
+  const projectLoadReqRef = useRef(0);
 
   const handleSaveProject = async () => {
     const autoName = deriveProjectName();
@@ -470,6 +509,9 @@ export default function Home() {
 
   const handleLoadCloudProject = async (id: string) => {
     if (id === projectId) return; // Already on this project
+    // Cancel pending cloud-create responses so they can't override active selection.
+    cloudCreateReqRef.current += 1;
+    const loadReqId = ++projectLoadReqRef.current;
 
     // Save current project BEFORE switching
     if (projectId && scenes.some((s) => s.prompt.trim() || s.videoUrl)) {
@@ -493,6 +535,7 @@ export default function Home() {
         const raw = localStorage.getItem(`cutagent-project-${id}`);
         if (!raw) return;
         const data = JSON.parse(raw);
+        if (projectLoadReqRef.current !== loadReqId) return;
         if (data.scenes) setScenes(scenesFromPartials(data.scenes));
         if (data.styleContext) setStyleContext(data.styleContext);
         if (data.audioTracks) setAudioTracks(data.audioTracks);
@@ -500,6 +543,7 @@ export default function Home() {
         const resp = await fetch(`/api/projects/${id}`);
         if (!resp.ok) return;
         const data = await resp.json();
+        if (projectLoadReqRef.current !== loadReqId) return;
         if (data.scenes) setScenes(scenesFromPartials(data.scenes));
         if (data.style_context) setStyleContext(data.style_context);
         if (data.audio_tracks) setAudioTracks(data.audio_tracks);
@@ -518,7 +562,7 @@ export default function Home() {
         const resp = await fetch("/api/projects");
         if (resp.ok) {
           const projects = await resp.json();
-          setSavedProjects(projects);
+          setSavedProjects(Array.isArray(projects) ? projects : []);
         }
       } catch { /* ignore */ }
     }
@@ -533,14 +577,26 @@ export default function Home() {
       // Cloud: fetch from Supabase
       try {
         const resp = await fetch("/api/projects");
-        if (resp.ok) setSavedProjects(await resp.json());
-      } catch { /* ignore */ }
+        if (resp.ok) {
+          const data = await resp.json();
+          setSavedProjects(Array.isArray(data) ? data : []);
+        }
+      } catch {
+        setSavedProjects([]);
+      }
     } else {
       // Local: load project list from localStorage
       try {
         const raw = localStorage.getItem(LOCAL_PROJECTS_KEY);
-        if (raw) setSavedProjects(JSON.parse(raw));
-      } catch { /* ignore */ }
+        if (!raw) {
+          setSavedProjects([]);
+          return;
+        }
+        const data = JSON.parse(raw);
+        setSavedProjects(Array.isArray(data) ? data : []);
+      } catch {
+        setSavedProjects([]);
+      }
     }
   };
 
@@ -562,11 +618,15 @@ export default function Home() {
 
   // ── Sidebar: new project (appears immediately in sidebar) ──
   const handleNewProject = () => {
-    const newId = session?.user ? null : `local-${Date.now()}`;
-    const newScenes = [makeScene(0)];
+    // Invalidate stale async project loads/creates before starting a new project flow.
+    const createReqId = ++cloudCreateReqRef.current;
+    projectLoadReqRef.current += 1;
+    const newId = session?.user ? null : `local-${crypto.randomUUID()}`;
+    const freshCtx = createDefaultStyleContext();
+    const newScenes = [makeScene(0, freshCtx.aspectRatio)];
 
     setScenes(newScenes);
-    setStyleContext(createDefaultStyleContext());
+    setStyleContext(freshCtx);
     setAudioTracks([]);
     setSelectedScene(0);
 
@@ -575,12 +635,12 @@ export default function Home() {
       setProjectId(newId);
       const entry = { id: newId, name: "New project", updated_at: new Date().toISOString() };
       setSavedProjects((prev) => {
-        const updated = [entry, ...prev];
+        const updated = [entry, ...prev.filter((p) => p.id !== newId)];
         saveLocalProjectList(updated);
         return updated;
       });
       try {
-        localStorage.setItem(`cutagent-project-${newId}`, JSON.stringify({ scenes: newScenes, styleContext: createDefaultStyleContext(), audioTracks: [] }));
+        localStorage.setItem(`cutagent-project-${newId}`, JSON.stringify({ scenes: newScenes, styleContext: freshCtx, audioTracks: [] }));
       } catch { /* ignore */ }
     } else {
       // Cloud mode: create on server immediately
@@ -590,10 +650,11 @@ export default function Home() {
           const resp = await fetch("/api/projects", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name: "New project", scenes: newScenes, styleContext: createDefaultStyleContext(), audioTracks: [] }),
+            body: JSON.stringify({ name: "New project", scenes: newScenes, styleContext: freshCtx, audioTracks: [] }),
           });
           if (resp.ok) {
             const data = await resp.json();
+            if (cloudCreateReqRef.current !== createReqId) return;
             setProjectId(data.id);
             fetchProjects();
           }
@@ -605,10 +666,14 @@ export default function Home() {
   // ── Sidebar: delete project ──
   const handleDeleteProject = async (id: string) => {
     try {
+      // Deleting from sidebar should invalidate stale in-flight create/load responses.
+      cloudCreateReqRef.current += 1;
+      projectLoadReqRef.current += 1;
       if (id.startsWith("local-")) {
         localStorage.removeItem(`cutagent-project-${id}`);
       } else {
-        await fetch(`/api/projects/${id}`, { method: "DELETE" });
+        const resp = await fetch(`/api/projects/${id}`, { method: "DELETE" });
+        if (!resp.ok) throw new Error("Delete failed");
       }
       setSavedProjects((prev) => {
         const updated = prev.filter((p) => p.id !== id);
@@ -617,13 +682,16 @@ export default function Home() {
       });
       // If we deleted the active project, just clear the editor (don't create a new one)
       if (projectId === id) {
-        setScenes([makeScene(0)]);
-        setStyleContext(createDefaultStyleContext());
+        const freshCtx = createDefaultStyleContext();
+        setScenes([makeScene(0, freshCtx.aspectRatio)]);
+        setStyleContext(freshCtx);
         setAudioTracks([]);
         setProjectId(null);
         setSelectedScene(0);
       }
-    } catch { /* ignore */ }
+    } catch {
+      alert("Failed to delete project. Please try again.");
+    }
   };
 
   // ── Smart project naming — derive name from content ──
@@ -705,7 +773,7 @@ export default function Home() {
       }
     }, 3000);
     return () => clearTimeout(cloudSaveTimer.current);
-  }, [scenes, styleContext, audioTracks, session?.user?.id]);
+  }, [scenes, styleContext, audioTracks, projectId, session?.user?.id]);
 
   // ── Audio tracks (project-level music) ──
   const addAudioTrack = (track: AudioTrack) => setAudioTracks((prev) => [...prev, track]);
@@ -745,7 +813,7 @@ export default function Home() {
 
   // ── Product Import handler ──
   const handleProductImport = (product: ProductData) => {
-    const storyboard = generateProductStoryboard(product);
+    const storyboard = generateProductStoryboard(product, styleContext.aspectRatio);
     const newScenes = scenesFromPartials(storyboard);
     setScenes(newScenes);
     setSelectedScene(0);
@@ -762,19 +830,8 @@ export default function Home() {
           label: i === 0 ? `${product.title.slice(0, 30)} (main)` : `Product image ${i + 1}`,
         }));
 
-        // Build a rich style brief from product data + entities
-        const briefParts: string[] = [];
-        if (product.title) briefParts.push(`Product: ${product.title.replace(/[®™©]/g, "")}.`);
-        if (product.description) {
-          // Use first 2 sentences of description for context
-          const descSentences = product.description.split(/[.!]/).filter((s: string) => s.trim().length > 10).slice(0, 2);
-          if (descSentences.length) briefParts.push(`What it is: ${descSentences.join(". ")}.`);
-        }
-        if (product.category) briefParts.push(`Category: ${product.category}.`);
-        if (product.color) briefParts.push(`Color: ${product.color}.`);
-        if (product.material) briefParts.push(`Material: ${product.material}.`);
-        briefParts.push("The actual product must be clearly visible and recognizable in every scene.");
-        briefParts.push("When showing a person, they must be holding or interacting with this specific product.");
+        // Build a site-type-aware style brief (physical vs digital)
+        const brief = buildStyleBrief(product);
 
         return {
           ...prev,
@@ -785,7 +842,7 @@ export default function Home() {
           ],
           brief: {
             ...prev.brief,
-            description: prev.brief.description || briefParts.join(" "),
+            description: prev.brief.description || brief,
           },
         };
       });
@@ -806,18 +863,11 @@ export default function Home() {
           type: "product" as const,
           label: i === 0 ? `${product.title.slice(0, 30)} (main)` : `Product image ${i + 1}`,
         }));
-        const briefParts: string[] = [];
-        if (product.title) briefParts.push(`Product: ${product.title.replace(/[®™©]/g, "")}.`);
-        if (product.description) {
-          const descSentences = product.description.split(/[.!]/).filter((s: string) => s.trim().length > 10).slice(0, 2);
-          if (descSentences.length) briefParts.push(`What it is: ${descSentences.join(". ")}.`);
-        }
-        if (product.category) briefParts.push(`Category: ${product.category}.`);
-        briefParts.push("The actual product must be clearly visible and recognizable in every scene.");
+        const brief = buildStyleBrief(product);
         return {
           ...prev,
           references: [...prev.references.filter((r) => r.type !== "product"), ...productRefs],
-          brief: { ...prev.brief, description: prev.brief.description || briefParts.join(" ") },
+          brief: { ...prev.brief, description: prev.brief.description || brief },
         };
       });
     }
@@ -837,7 +887,7 @@ export default function Home() {
 
   // ── Template handler ──
   const handleTemplateSelect = (template: Template, productName: string) => {
-    const storyboard = applyTemplate(template, productName);
+    const storyboard = applyTemplate(template, productName, styleContext.aspectRatio);
     const newScenes = scenesFromPartials(storyboard);
     setScenes(newScenes);
     setSelectedScene(0);
@@ -909,8 +959,8 @@ export default function Home() {
       <header className="relative z-20 border-b border-white/10 bg-slate-950/55 backdrop-blur-xl">
         <div className="mx-auto flex w-full max-w-[1500px] flex-wrap items-center justify-between gap-4 px-4 py-4 sm:px-6">
           <div className="flex items-center gap-4">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/6 text-sm font-semibold shadow-[0_16px_40px_rgba(0,0,0,0.28)]">
-              CA
+            <div className="shadow-[0_16px_40px_rgba(0,0,0,0.28)]">
+              <Logo size={44} />
             </div>
             <div>
               <div className="flex items-center gap-3">
@@ -938,10 +988,10 @@ export default function Home() {
               GitHub
             </a>
             <Link
-              href="/waitlist"
+              href="/auth/signin#pricing"
               className="rounded-full border border-white/10 bg-white/6 px-4 py-2 text-xs font-medium text-zinc-300 hover:border-white/20 hover:bg-white/10"
             >
-              Home
+              Pricing
             </Link>
             {!keySet ? (
               <div className="glass-panel flex flex-wrap gap-2 rounded-2xl p-2">
@@ -1003,8 +1053,8 @@ export default function Home() {
                     🔗
                   </div>
                   <div>
-                    <span className="text-sm font-semibold text-white block">Paste a product URL to get started</span>
-                    <span className="text-[11px] text-zinc-500">Shopify, Amazon, or any product page → 4-scene ad storyboard</span>
+                    <span className="text-sm font-semibold text-white block">Paste any URL to get started</span>
+                    <span className="text-[11px] text-zinc-500">Product page, SaaS app, or landing page → 4-scene ad storyboard</span>
                   </div>
                 </button>
                 <div className="flex gap-2 shrink-0">
@@ -1042,6 +1092,22 @@ export default function Home() {
                     {completedCount > 0 && <span className="text-emerald-400"> · {completedCount} done</span>}
                     {totalSpent > 0 && <span className="text-amber-300"> · ${totalSpent.toFixed(2)}</span>}
                   </span>
+                  {/* Project aspect ratio — single source of truth for the whole project */}
+                  <div className="flex items-center gap-1 rounded-lg border border-white/8 bg-white/[0.04] p-0.5" title="Project canvas — every scene generates and exports at this ratio">
+                    {(["9:16", "16:9", "1:1"] as const).map((ar) => (
+                      <button
+                        key={ar}
+                        onClick={() => handleAspectRatioChange(ar)}
+                        className={`rounded-md px-2 py-1 text-[10px] font-medium transition ${
+                          styleContext.aspectRatio === ar
+                            ? "bg-cyan-400/15 text-cyan-200"
+                            : "text-zinc-400 hover:text-zinc-200"
+                        }`}
+                      >
+                        {ar}
+                      </button>
+                    ))}
+                  </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-1.5">
                   <button onClick={addScene} className="rounded-lg border border-white/8 bg-white/[0.04] hover:bg-white/[0.07] px-3 py-1.5 text-xs text-zinc-300 transition">
@@ -1051,8 +1117,9 @@ export default function Home() {
                     onClick={generateAll}
                     disabled={!keySet || scenes.every((s) => !s.prompt.trim() || s.status === "generating")}
                     className="rounded-lg bg-cyan-500 hover:bg-cyan-400 disabled:bg-zinc-800 disabled:text-zinc-600 px-5 py-1.5 text-xs font-semibold text-slate-950 transition shadow-[0_8px_20px_rgba(83,212,255,0.2)]"
+                    title="Generate video for every scene, then generate voiceover audio for any scene with VO text"
                   >
-                    Generate All
+                    Video + Audio
                   </button>
                   <button onClick={() => setShowPreview(true)} disabled={completedCount === 0} className="rounded-lg border border-white/8 bg-white/[0.04] hover:bg-white/[0.07] disabled:opacity-30 px-3 py-1.5 text-xs text-zinc-300 transition">
                     Preview

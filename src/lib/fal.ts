@@ -9,7 +9,7 @@ export function configureFal(apiKey: string) {
 export interface GenerateOptions {
   scene: Scene;
   styleContext?: StyleContext;
-  onProgress?: (status: string, logs?: string[]) => void;
+  onProgress?: (status: string, logs?: string[], progress?: number) => void;
 }
 
 /**
@@ -117,6 +117,23 @@ export async function generateScene({ scene, styleContext, onProgress }: Generat
   videoUrl: string;
   requestId: string;
 }> {
+  const extractProgressFromLogs = (logs: string[]): number | undefined => {
+    for (let i = logs.length - 1; i >= 0; i--) {
+      const match = logs[i].match(/(\d{1,3})(?:\.\d+)?\s*%/);
+      if (!match) continue;
+      const value = Number(match[1]);
+      if (!Number.isNaN(value) && value >= 0 && value <= 100) {
+        return value;
+      }
+    }
+    return undefined;
+  };
+
+  const estimateProgress = (pollIndex: number, maxPolls: number): number => {
+    const ratio = Math.min(1, Math.max(0, pollIndex / Math.max(1, maxPolls - 1)));
+    return Math.round(15 + ratio * 80); // 15..95 while in progress
+  };
+
   const ctx = styleContext ?? createDefaultStyleContext();
   const model = findModel(scene.modelId);
 
@@ -143,7 +160,7 @@ export async function generateScene({ scene, styleContext, onProgress }: Generat
   });
 
   // Submit to queue
-  onProgress?.("Queued", []);
+  onProgress?.("Queued", [], 10);
 
   let submitResult;
   try {
@@ -169,7 +186,7 @@ export async function generateScene({ scene, styleContext, onProgress }: Generat
 
   // Poll with full endpoint ID to avoid SDK path-truncation bug
   const POLL_INTERVAL = 3000;
-  const MAX_POLLS = 300; // ~15 minutes (some models like HunyuanVideo img2vid are slow)
+  const MAX_POLLS = /hunyuan/i.test(endpointId) ? 600 : 300; // Hunyuan can run longer than 15 minutes
 
   for (let i = 0; i < MAX_POLLS; i++) {
     await new Promise((r) => setTimeout(r, POLL_INTERVAL));
@@ -193,14 +210,22 @@ export async function generateScene({ scene, styleContext, onProgress }: Generat
       continue;
     }
 
+    const logs = "logs" in status
+      ? (status.logs ?? []).map((l: { message: string }) => l.message)
+      : [];
+    const inferred = extractProgressFromLogs(logs);
+    const fallbackProgress = estimateProgress(i, MAX_POLLS);
+
     if (status.status === "IN_QUEUE") {
-      onProgress?.("Queued", []);
+      onProgress?.("Queued", logs, 10);
     } else if (status.status === "IN_PROGRESS") {
-      const logs = "logs" in status
-        ? (status.logs ?? []).map((l: { message: string }) => l.message)
-        : [];
-      onProgress?.("Generating", logs);
+      const progress = inferred === undefined ? fallbackProgress : Math.max(15, Math.min(95, inferred));
+      onProgress?.("Generating", logs, progress);
     } else if (status.status === "COMPLETED") {
+      // Queue can report completed-with-error. Surface that directly.
+      if ("error" in status && (status as { error?: unknown }).error) {
+        throw new Error(`[${endpointId}] ${String((status as { error?: unknown }).error)}`);
+      }
       // Fetch result
       const result = await fal.queue.result(endpointId, { requestId });
       const data = result.data as Record<string, unknown>;
@@ -222,8 +247,12 @@ export async function generateScene({ scene, styleContext, onProgress }: Generat
         ? String((status as { error?: unknown }).error)
         : "Generation failed on fal.ai";
       throw new Error(`[${endpointId}] ${errorMsg}`);
+    } else {
+      // Unknown/extended status values should still move visible progress.
+      onProgress?.("Generating", logs, fallbackProgress);
     }
   }
 
-  throw new Error(`Generation timed out after 10 minutes [${endpointId}]`);
+  const timeoutMin = Math.round((POLL_INTERVAL * MAX_POLLS) / 60000);
+  throw new Error(`Generation timed out after ${timeoutMin} minutes [${endpointId}]`);
 }

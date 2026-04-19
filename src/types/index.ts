@@ -39,6 +39,8 @@ export interface ReferenceImage {
   sourceSceneId?: string;
 }
 
+export type AspectRatio = "9:16" | "16:9" | "1:1";
+
 export interface StyleContext {
   brief: StyleBrief;
   references: ReferenceImage[];
@@ -48,6 +50,8 @@ export interface StyleContext {
   strength: number;
   /** Whether to auto-extract last frame from completed scenes */
   autoChainLastFrame: boolean;
+  /** Project canvas — every scene is generated and exported at this ratio */
+  aspectRatio: AspectRatio;
 }
 
 export function createDefaultStyleContext(): StyleContext {
@@ -62,6 +66,7 @@ export function createDefaultStyleContext(): StyleContext {
     defaultReferenceTypes: ["character", "style", "product", "last-frame"],
     strength: 0.7,
     autoChainLastFrame: true,
+    aspectRatio: "9:16",
   };
 }
 
@@ -105,7 +110,7 @@ export const MODEL_CATALOG: ModelInfo[] = [
     name: "MiniMax Live",
     provider: "MiniMax",
     maxDuration: 6,
-    supportedDurations: [3, 6],
+    supportedDurations: [6],
     supportedAspectRatios: null, // MiniMax does NOT support aspect ratio control
     supportsAudio: false,
     consistency: {
@@ -121,8 +126,8 @@ export const MODEL_CATALOG: ModelInfo[] = [
     id: "fal-ai/wan-25-preview/text-to-video",
     name: "Wan 2.5",
     provider: "Alibaba",
-    maxDuration: 5,
-    supportedDurations: [3, 5],
+    maxDuration: 10,
+    supportedDurations: [5, 10],
     supportedAspectRatios: ["16:9", "9:16", "1:1"],
     supportsAudio: false,
     consistency: {
@@ -155,8 +160,8 @@ export const MODEL_CATALOG: ModelInfo[] = [
     id: "fal-ai/luma-dream-machine/ray-2",
     name: "Luma Ray 2",
     provider: "Luma",
-    maxDuration: 5,
-    supportedDurations: [5],
+    maxDuration: 9,
+    supportedDurations: [5, 9],
     supportedAspectRatios: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "9:21"],
     supportsAudio: false,
     consistency: {
@@ -172,8 +177,8 @@ export const MODEL_CATALOG: ModelInfo[] = [
     id: "fal-ai/bytedance/seedance/v1.5/pro/text-to-video",
     name: "Seedance 1.5",
     provider: "ByteDance",
-    maxDuration: 10,
-    supportedDurations: [5, 10],
+    maxDuration: 12,
+    supportedDurations: [4, 6, 8, 10, 12],
     supportedAspectRatios: ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"],
     supportsAudio: true,
     consistency: {
@@ -191,7 +196,7 @@ export const MODEL_CATALOG: ModelInfo[] = [
     provider: "Google",
     maxDuration: 8,
     supportedDurations: [5, 6, 7, 8],
-    supportedAspectRatios: ["16:9", "9:16"],
+    supportedAspectRatios: ["16:9", "9:16", "1:1"],
     supportsAudio: false,
     consistency: {
       mechanism: "image-to-video",
@@ -207,7 +212,7 @@ export const MODEL_CATALOG: ModelInfo[] = [
     name: "Veo 3",
     provider: "Google",
     maxDuration: 8,
-    supportedDurations: [5, 6, 7, 8],
+    supportedDurations: [4, 6, 8],
     supportedAspectRatios: ["16:9", "9:16"],
     supportsAudio: true,
     consistency: {
